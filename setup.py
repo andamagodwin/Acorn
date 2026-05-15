@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="nova-agent",
-    version="1.0.0",
+    version="2.0.0",
     packages=find_packages(),
     install_requires=[
         "google-genai>=1.0.0",

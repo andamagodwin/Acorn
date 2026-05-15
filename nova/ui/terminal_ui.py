@@ -41,7 +41,7 @@ class Spinner:
         self._running = False
         if self._thread:
             self._thread.join()
-        sys.stdout.write("\r\033[K")  # Clear the line
+        sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
     def _spin(self):
@@ -60,9 +60,9 @@ class TerminalUI:
     def banner(self):
         print(f"""
 {Colors.CYAN}{Colors.BOLD}╔══════════════════════════════════════════════════╗
-║              ✦  N O V A  v1.0  ✦                ║
+║              ✦  N O V A  v2.0  ✦                ║
 ║        Autonomous Coding Agent                   ║
-║        Powered by Vertex AI (Gemini 2.5 Pro)     ║
+║        Streaming · Smart Routing · Auto-Retry    ║
 ╚══════════════════════════════════════════════════╝{Colors.RESET}
 """)
 
@@ -107,10 +107,14 @@ class TerminalUI:
     def permission_prompt(self, action: str, details: str) -> bool:
         print(f"\n  {Colors.YELLOW}⚠️  Permission required:{Colors.RESET}")
         print(f"  {Colors.YELLOW}   Action: {action}{Colors.RESET}")
+        if len(details) > 200:
+            details = details[:200] + "..."
         print(f"  {Colors.YELLOW}   Details: {details}{Colors.RESET}")
         try:
             response = input(f"  {Colors.YELLOW}   Allow? [y/N/always]: {Colors.RESET}").strip().lower()
-            return response in ('y', 'yes', 'always')
+            if response == 'always':
+                return True  # TODO: persist this choice
+            return response in ('y', 'yes')
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -128,3 +132,6 @@ class TerminalUI:
 
     def divider(self):
         print(f"  {Colors.DIM}{'─' * 50}{Colors.RESET}")
+
+    def cost_display(self, stats: dict):
+        print(f"  {Colors.DIM}💰 Pro calls: {stats['pro_calls']} | Flash calls: {stats['flash_calls']} | {stats['estimated_savings']}{Colors.RESET}")
