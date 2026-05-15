@@ -1,0 +1,2 @@
+[console_scripts]
+acorn = nova.main:main

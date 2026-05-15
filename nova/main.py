@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nova Agent — entry point for the `nova` CLI command."""
+"""Acorn Agent — entry point for the `acorn` CLI command."""
 import sys
 import os
 
@@ -16,9 +16,9 @@ def main():
 
     if "--help" in args or "-h" in args:
         print("""
-Nova v2.0 — Autonomous Coding Agent
+🌰 Acorn v2.0 — Autonomous Coding Agent
 
-Usage: nova [options]
+Usage: acorn [options]
 
 Options:
   --model <name>     Set the Pro model (default: gemini-2.5-pro)

@@ -1,4 +1,5 @@
-"""Rich terminal UI for Nova — colored output, spinners, and formatted displays."""
+"""Rich terminal UI for Acorn — colored output, markdown rendering, and spinners."""
+import re
 import sys
 import time
 import threading
@@ -10,6 +11,8 @@ class Colors:
     BOLD = "\033[1m"
     DIM = "\033[2m"
     ITALIC = "\033[3m"
+    UNDERLINE = "\033[4m"
+    STRIKETHROUGH = "\033[9m"
 
     RED = "\033[31m"
     GREEN = "\033[32m"
@@ -18,8 +21,97 @@ class Colors:
     MAGENTA = "\033[35m"
     CYAN = "\033[36m"
     WHITE = "\033[37m"
+    GRAY = "\033[90m"
 
     BG_DARK = "\033[48;5;236m"
+    BG_CODE = "\033[48;5;238m"
+
+
+class MarkdownRenderer:
+    """Converts markdown text to ANSI-formatted terminal output."""
+
+    @staticmethod
+    def render(text: str) -> str:
+        """Converts markdown formatting to ANSI escape codes."""
+        lines = text.split('\n')
+        rendered_lines = []
+        in_code_block = False
+        code_block_lines = []
+
+        for line in lines:
+            # Code blocks (```)
+            if line.strip().startswith('```'):
+                if in_code_block:
+                    # End code block
+                    rendered_lines.append(f"  {Colors.DIM}┌{'─' * 50}")
+                    for cl in code_block_lines:
+                        rendered_lines.append(f"  │ {Colors.GREEN}{cl}{Colors.RESET}")
+                    rendered_lines.append(f"  └{'─' * 50}{Colors.RESET}")
+                    code_block_lines = []
+                    in_code_block = False
+                else:
+                    in_code_block = True
+                continue
+
+            if in_code_block:
+                code_block_lines.append(line)
+                continue
+
+            # Headers
+            if line.startswith('### '):
+                rendered_lines.append(f"{Colors.CYAN}{Colors.BOLD}   {line[4:]}{Colors.RESET}")
+                continue
+            elif line.startswith('## '):
+                rendered_lines.append(f"{Colors.CYAN}{Colors.BOLD}  {line[3:]}{Colors.RESET}")
+                continue
+            elif line.startswith('# '):
+                rendered_lines.append(f"{Colors.CYAN}{Colors.BOLD}{line[2:]}{Colors.RESET}")
+                continue
+
+            # Bullet points
+            if line.strip().startswith('* ') or line.strip().startswith('- '):
+                indent = len(line) - len(line.lstrip())
+                content = line.strip()[2:]
+                content = MarkdownRenderer._inline_format(content)
+                rendered_lines.append(f"{' ' * indent}  • {content}")
+                continue
+
+            # Numbered lists
+            numbered = re.match(r'^(\s*)\d+\.\s+(.*)', line)
+            if numbered:
+                indent = numbered.group(1)
+                content = MarkdownRenderer._inline_format(numbered.group(2))
+                rendered_lines.append(f"{indent}  {content}")
+                continue
+
+            # Normal text with inline formatting
+            rendered_lines.append(MarkdownRenderer._inline_format(line))
+
+        # Handle unclosed code block
+        if in_code_block and code_block_lines:
+            rendered_lines.append(f"  {Colors.DIM}┌{'─' * 50}")
+            for cl in code_block_lines:
+                rendered_lines.append(f"  │ {Colors.GREEN}{cl}{Colors.RESET}")
+            rendered_lines.append(f"  └{'─' * 50}{Colors.RESET}")
+
+        return '\n'.join(rendered_lines)
+
+    @staticmethod
+    def _inline_format(text: str) -> str:
+        """Handles inline markdown: bold, italic, code, links."""
+        # Inline code `text`
+        text = re.sub(r'`([^`]+)`', f'{Colors.BG_CODE}{Colors.GREEN} \\1 {Colors.RESET}', text)
+        # Bold **text**
+        text = re.sub(r'\*\*([^*]+)\*\*', f'{Colors.BOLD}\\1{Colors.RESET}', text)
+        # Bold __text__
+        text = re.sub(r'__([^_]+)__', f'{Colors.BOLD}\\1{Colors.RESET}', text)
+        # Italic *text*
+        text = re.sub(r'\*([^*]+)\*', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
+        # Italic _text_
+        text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
+        # Links [text](url) — show text underlined
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', f'{Colors.UNDERLINE}{Colors.CYAN}\\1{Colors.RESET}', text)
+        return text
 
 
 class Spinner:
@@ -55,15 +147,30 @@ class Spinner:
 
 
 class TerminalUI:
-    """Handles all terminal output formatting."""
+    """Handles all terminal output formatting with markdown rendering."""
+
+    def __init__(self):
+        self.md = MarkdownRenderer()
 
     def banner(self):
         print(f"""
-{Colors.CYAN}{Colors.BOLD}╔══════════════════════════════════════════════════╗
-║              ✦  N O V A  v2.0  ✦                ║
-║        Autonomous Coding Agent                   ║
-║        Streaming · Smart Routing · Auto-Retry    ║
-╚══════════════════════════════════════════════════╝{Colors.RESET}
+{Colors.GREEN}        ⠀⠀⠀⠀⠀⠀⢀⣤⣶⣶⣶⣤⡀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⢀⣾⣿⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠈⠛⢿⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⠀⠀⠀⠀⠀⠀⠀⠀
+        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⠀⠀⠀⠀⠀⠀⠀⠀{Colors.RESET}
+{Colors.BOLD}{Colors.WHITE}     █████╗  ██████╗ ██████╗ ██████╗ ███╗   ██╗
+    ██╔══██╗██╔════╝██╔═══██╗██╔══██╗████╗  ██║
+    ███████║██║     ██║   ██║██████╔╝██╔██╗ ██║
+    ██╔══██║██║     ██║   ██║██╔══██╗██║╚██╗██║
+    ██║  ██║╚██████╗╚██████╔╝██║  ██║██║ ╚████║
+    ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝{Colors.RESET}
+{Colors.DIM}    ─────────────────────────────────────────────
+    Autonomous Coding Agent · v2.0
+    Powered by Vertex AI · Streaming · Smart Routing
+    ─────────────────────────────────────────────{Colors.RESET}
 """)
 
     def user_prompt(self) -> str:
@@ -73,10 +180,12 @@ class TerminalUI:
             return "exit"
 
     def nova_response(self, text: str):
-        print(f"\n{Colors.BLUE}{Colors.BOLD}Nova:{Colors.RESET} {text}")
+        """Renders Nova's response with full markdown formatting."""
+        rendered = self.md.render(text)
+        print(f"\n{Colors.BLUE}{Colors.BOLD}Acorn:{Colors.RESET} {rendered}")
 
     def stream_start(self):
-        sys.stdout.write(f"\n{Colors.BLUE}{Colors.BOLD}Nova:{Colors.RESET} ")
+        sys.stdout.write(f"\n{Colors.BLUE}{Colors.BOLD}Acorn:{Colors.RESET} ")
         sys.stdout.flush()
 
     def stream_chunk(self, text: str):
@@ -86,6 +195,16 @@ class TerminalUI:
     def stream_end(self):
         print()
 
+    def stream_response_formatted(self, full_text: str):
+        """After streaming completes, re-render with markdown formatting."""
+        # Move cursor up and rewrite with formatting
+        # For streaming we show raw first, then this is called to show formatted
+        rendered = self.md.render(full_text)
+        # Only reformat if there's actual markdown syntax present
+        if any(c in full_text for c in ['**', '`', '```', '# ', '* ', '- ']):
+            print(f"\n{Colors.DIM}{'─' * 50}{Colors.RESET}")
+            print(rendered)
+
     def tool_call(self, tool_name: str, args_summary: str):
         print(f"\n  {Colors.MAGENTA}⚡ {tool_name}{Colors.RESET}{Colors.DIM} → {args_summary}{Colors.RESET}")
 
@@ -93,16 +212,16 @@ class TerminalUI:
         lines = result.split('\n')
         if len(lines) > max_lines:
             display = '\n'.join(lines[:max_lines])
-            print(f"  {Colors.DIM}┌─────────────────────────────────")
+            print(f"  {Colors.DIM}┌{'─' * 50}")
             for line in display.split('\n'):
                 print(f"  │ {line}")
             print(f"  │ ... ({len(lines) - max_lines} more lines)")
-            print(f"  └─────────────────────────────────{Colors.RESET}")
+            print(f"  └{'─' * 50}{Colors.RESET}")
         else:
-            print(f"  {Colors.DIM}┌─────────────────────────────────")
+            print(f"  {Colors.DIM}┌{'─' * 50}")
             for line in lines:
                 print(f"  │ {line}")
-            print(f"  └─────────────────────────────────{Colors.RESET}")
+            print(f"  └{'─' * 50}{Colors.RESET}")
 
     def permission_prompt(self, action: str, details: str) -> bool:
         print(f"\n  {Colors.YELLOW}⚠️  Permission required:{Colors.RESET}")
@@ -113,7 +232,7 @@ class TerminalUI:
         try:
             response = input(f"  {Colors.YELLOW}   Allow? [y/N/always]: {Colors.RESET}").strip().lower()
             if response == 'always':
-                return True  # TODO: persist this choice
+                return True
             return response in ('y', 'yes')
         except (EOFError, KeyboardInterrupt):
             return False
@@ -134,4 +253,4 @@ class TerminalUI:
         print(f"  {Colors.DIM}{'─' * 50}{Colors.RESET}")
 
     def cost_display(self, stats: dict):
-        print(f"  {Colors.DIM}💰 Pro calls: {stats['pro_calls']} | Flash calls: {stats['flash_calls']} | {stats['estimated_savings']}{Colors.RESET}")
+        print(f"  {Colors.DIM}💰 Pro: {stats['pro_calls']} | Flash: {stats['flash_calls']} | {stats['estimated_savings']}{Colors.RESET}")

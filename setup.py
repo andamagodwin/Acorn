@@ -1,8 +1,8 @@
-"""Allows `pip install -e .` for development and `nova` command."""
+"""Allows `pip install -e .` for development and `acorn` command."""
 from setuptools import setup, find_packages
 
 setup(
-    name="nova-agent",
+    name="acorn-agent",
     version="2.0.0",
     packages=find_packages(),
     install_requires=[
@@ -11,7 +11,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "nova=nova.main:main",
+            "acorn=nova.main:main",
         ],
     },
     python_requires=">=3.11",

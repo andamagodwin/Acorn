@@ -15,7 +15,7 @@ from nova.tools.git_tools import GitTools
 from nova.ui.terminal_ui import TerminalUI, Spinner
 
 
-SYSTEM_PROMPT = """You are Nova, an elite autonomous coding agent operating on the user's local machine.
+SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on the user's local machine.
 
 ## Core Capabilities
 - Read, write, and edit files with surgical precision
@@ -496,6 +496,10 @@ class NovaAgent:
                 final_text = full_text or "(No response)"
                 self.context.add("model", final_text)
 
+                # If streamed, re-render with markdown formatting
+                if self.settings.streaming:
+                    self.ui.stream_response_formatted(final_text)
+
                 # Persist session
                 if self.settings.persist_sessions:
                     self._save_session()
@@ -588,7 +592,7 @@ class NovaAgent:
 
             # Slash commands
             if cmd in ('exit', 'quit', '/exit', '/quit'):
-                self.ui.success("Nova signing off. ✦")
+                self.ui.success("Acorn signing off. 🌰")
                 break
             elif cmd == '/clear':
                 self.context.clear()
@@ -644,3 +648,4 @@ class NovaAgent:
             response = self.chat(user_input)
             if not self.settings.streaming:
                 self.ui.nova_response(response)
+            # When streaming is on, output is already printed by stream methods
