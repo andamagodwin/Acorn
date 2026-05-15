@@ -153,24 +153,25 @@ class TerminalUI:
         self.md = MarkdownRenderer()
 
     def banner(self):
+        # Gradient: pale tan → warm brown → reddish-brown → dark
+        TAN = "\033[38;2;210;180;140m"
+        BROWN = "\033[38;2;180;120;60m"
+        DBROWN = "\033[38;2;139;69;19m"
+        RBROWN = "\033[38;2;120;40;20m"
+        DARK = "\033[38;2;60;20;10m"
+        R = Colors.RESET
+
         print(f"""
-{Colors.GREEN}        ⠀⠀⠀⠀⠀⠀⢀⣤⣶⣶⣶⣤⡀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⢀⣾⣿⣿⣿⣿⣿⣿⣷⡀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠻⣿⣿⣿⣿⣿⣿⣿⣿⠟⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠈⠛⢿⣿⣿⡿⠛⠁⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⠀⠀⠀⠀⠀⠀⠀⠀
-        ⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣿⠀⠀⠀⠀⠀⠀⠀⠀{Colors.RESET}
-{Colors.BOLD}{Colors.WHITE}     █████╗  ██████╗ ██████╗ ██████╗ ███╗   ██╗
-    ██╔══██╗██╔════╝██╔═══██╗██╔══██╗████╗  ██║
-    ███████║██║     ██║   ██║██████╔╝██╔██╗ ██║
-    ██╔══██║██║     ██║   ██║██╔══██╗██║╚██╗██║
-    ██║  ██║╚██████╗╚██████╔╝██║  ██║██║ ╚████║
-    ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝{Colors.RESET}
+{TAN}     █████╗  {BROWN}██████╗ {DBROWN}██████╗ {RBROWN}██████╗ {DARK}███╗   ██╗
+{TAN}    ██╔══██╗{BROWN}██╔════╝{DBROWN}██╔═══██╗{RBROWN}██╔══██╗{DARK}████╗  ██║
+{TAN}    ███████║{BROWN}██║     {DBROWN}██║   ██║{RBROWN}██████╔╝{DARK}██╔██╗ ██║
+{TAN}    ██╔══██║{BROWN}██║     {DBROWN}██║   ██║{RBROWN}██╔══██╗{DARK}██║╚██╗██║
+{TAN}    ██║  ██║{BROWN}╚██████╗{DBROWN}╚██████╔╝{RBROWN}██║  ██║{DARK}██║ ╚████║
+{TAN}    ╚═╝  ╚═╝{BROWN} ╚═════╝{DBROWN} ╚═════╝ {RBROWN}╚═╝  ╚═╝{DARK}╚═╝  ╚═══╝{R}
 {Colors.DIM}    ─────────────────────────────────────────────
     Autonomous Coding Agent · v2.0
     Powered by Vertex AI · Streaming · Smart Routing
-    ─────────────────────────────────────────────{Colors.RESET}
+    ─────────────────────────────────────────────{R}
 """)
 
     def user_prompt(self) -> str:
