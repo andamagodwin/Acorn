@@ -3,6 +3,7 @@ import re
 import sys
 import os
 import time
+import random
 import threading
 
 
@@ -31,11 +32,72 @@ class Colors:
     BG_CODE = "\033[48;5;236m"
 
 
+TOOL_VERBS = {
+    "read_file": [
+        "Peeking at", "Snooping through", "Eyeballing", "Absorbing",
+        "Devouring", "Scanning", "Inspecting", "Squinting at",
+        "Perusing", "Nosing into", "Leafing through", "Deciphering",
+    ],
+    "write_file": [
+        "Scribbling", "Conjuring", "Manifesting", "Birthing",
+        "Crafting", "Forging", "Summoning", "Materializing",
+        "Cooking up", "Whipping up", "Spinning up",
+    ],
+    "edit_file": [
+        "Performing surgery on", "Tweaking", "Massaging",
+        "Sprinkling magic on", "Rearranging the atoms of",
+        "Giving a facelift to", "Polishing", "Tinkering with",
+        "Nudging", "Reshuffling", "Fine-tuning",
+    ],
+    "list_directory": [
+        "Rummaging through", "Exploring", "Poking around",
+        "Cataloguing", "Taking inventory of", "Scouting",
+        "Surveying the land of", "Mapping out",
+    ],
+    "search_files": [
+        "Hunting for clues in", "Spelunking through",
+        "Playing detective in", "Digging through",
+        "Sifting the sands of", "Excavating",
+        "Going on a treasure hunt in", "Combing through",
+    ],
+    "execute_command": [
+        "Unleashing", "Firing off", "Launching",
+        "Sending to the shadow realm:", "Whispering to the shell:",
+        "Consulting the oracle:", "Dispatching",
+        "Pulling the lever on", "Running",
+    ],
+    "git_status": [
+        "Consulting the git gods", "Reading the commit tea leaves",
+        "Checking the vibe of the repo", "Peering into git history",
+        "Asking git what's up", "Interrogating the repository",
+    ],
+    "multi_edit": [
+        "Juggling multiple files", "Multi-tasking like a champ",
+        "Reading the whole bookshelf", "Gathering intel from",
+        "Assembling the puzzle pieces", "Speed-reading",
+    ],
+}
+
+THINKING_MESSAGES = [
+    "Pondering", "Cooking up something", "Brainstorming",
+    "Churning the gears", "Consulting the neural pathways",
+    "Assembling thoughts", "Marinating on that",
+    "Doing some mental gymnastics", "Scheming",
+    "Loading brain.exe", "Crunching the vibes",
+    "Summoning wisdom", "Connecting the dots",
+]
+
+
 def _term_width() -> int:
     try:
         return os.get_terminal_size().columns
     except OSError:
         return 80
+
+
+def _get_tool_verb(tool_name: str) -> str:
+    verbs = TOOL_VERBS.get(tool_name, ["Working on", "Processing", "Handling"])
+    return random.choice(verbs)
 
 
 class MarkdownRenderer:
@@ -116,12 +178,12 @@ class MarkdownRenderer:
 
 
 class Spinner:
-    """Animated thinking spinner."""
+    """Animated thinking spinner with fun messages."""
 
     FRAMES = ["    ", ".   ", "..  ", "... ", "....", " ...", "  ..", "   ."]
 
-    def __init__(self, message: str = "Thinking"):
-        self.message = message
+    def __init__(self, message: str = None):
+        self.message = message or random.choice(THINKING_MESSAGES)
         self._running = False
         self._thread = None
 
@@ -144,6 +206,38 @@ class Spinner:
             sys.stdout.write(f"\r  {Colors.DIM}{self.message}{frame}{Colors.RESET}")
             sys.stdout.flush()
             time.sleep(0.15)
+            i += 1
+
+
+class ToolSpinner:
+    """Brief animated indicator for tool execution."""
+
+    FRAMES = ["|", "/", "-", "\\"]
+
+    def __init__(self, message: str):
+        self.message = message
+        self._running = False
+        self._thread = None
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join()
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+    def _spin(self):
+        i = 0
+        while self._running:
+            frame = self.FRAMES[i % len(self.FRAMES)]
+            sys.stdout.write(f"\r  {Colors.CYAN}{frame}{Colors.RESET} {Colors.DIM}{self.message}{Colors.RESET}")
+            sys.stdout.flush()
+            time.sleep(0.1)
             i += 1
 
 
@@ -191,36 +285,76 @@ class TerminalUI:
         print(rendered)
 
     def stream_start(self):
-        print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
-        sys.stdout.write("  ")
-        sys.stdout.flush()
+        """Called when streaming begins — we'll collect text silently."""
+        pass
 
     def stream_chunk(self, text: str):
-        sys.stdout.write(text)
-        sys.stdout.flush()
+        """Silently collect — we render the final formatted version only."""
+        pass
 
     def stream_end(self):
-        print()
+        """Streaming done — nothing to do here, formatting happens in stream_response_formatted."""
+        pass
 
     def stream_response_formatted(self, full_text: str):
-        """After streaming, show formatted version if markdown is present."""
-        if any(c in full_text for c in ['**', '`', '```', '# ', '* ', '- ']):
-            rendered = self.md.render(full_text)
-            print(f"\n{rendered}")
+        """Render the complete response with markdown formatting — this is the only output."""
+        rendered = self.md.render(full_text)
+        print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
+        print(rendered)
 
     def tool_call(self, tool_name: str, args_summary: str):
-        print(f"\n  {Colors.CYAN}{tool_name}{Colors.RESET} {Colors.DIM}{args_summary}{Colors.RESET}")
+        """Shows a fun loading message for tool calls."""
+        verb = _get_tool_verb(tool_name)
+        # Extract the most relevant arg for display
+        short_arg = self._extract_short_arg(tool_name, args_summary)
+        if short_arg:
+            print(f"  {Colors.CYAN}~{Colors.RESET} {Colors.DIM}{verb} {short_arg}{Colors.RESET}")
+        else:
+            print(f"  {Colors.CYAN}~{Colors.RESET} {Colors.DIM}{verb}...{Colors.RESET}")
 
-    def tool_result(self, result: str, max_lines: int = 15):
+    def _extract_short_arg(self, tool_name: str, args_summary: str) -> str:
+        """Pulls out the most interesting part of tool args for display."""
+        if not args_summary:
+            return ""
+        # Try to get filepath or command
+        if "filepath=" in args_summary:
+            match = re.search(r"filepath='([^']*)'", args_summary)
+            if match:
+                path = match.group(1)
+                # Show just filename for brevity
+                if '/' in path:
+                    return path.split('/')[-1]
+                return path
+        if "command=" in args_summary:
+            match = re.search(r"command='([^']*)'", args_summary)
+            if match:
+                cmd = match.group(1)
+                if len(cmd) > 40:
+                    cmd = cmd[:40] + "..."
+                return cmd
+        if "query=" in args_summary:
+            match = re.search(r"query='([^']*)'", args_summary)
+            if match:
+                return f"'{match.group(1)}'"
+        if "path=" in args_summary:
+            match = re.search(r"path='([^']*)'", args_summary)
+            if match:
+                return match.group(1)
+        # Fallback: just trim it
+        if len(args_summary) > 50:
+            return args_summary[:50] + "..."
+        return args_summary
+
+    def tool_result(self, result: str, max_lines: int = 10):
         lines = result.split('\n')
         if len(lines) > max_lines:
             display_lines = lines[:max_lines]
             for line in display_lines:
-                print(f"  {Colors.DIM}{line}{Colors.RESET}")
-            print(f"  {Colors.DIM}... +{len(lines) - max_lines} lines{Colors.RESET}")
+                print(f"    {Colors.DIM}{line}{Colors.RESET}")
+            print(f"    {Colors.DIM}... +{len(lines) - max_lines} lines{Colors.RESET}")
         else:
             for line in lines:
-                print(f"  {Colors.DIM}{line}{Colors.RESET}")
+                print(f"    {Colors.DIM}{line}{Colors.RESET}")
 
     def permission_prompt(self, action: str, details: str) -> bool:
         print(f"\n  {Colors.YELLOW}Permission needed: {action}{Colors.RESET}")

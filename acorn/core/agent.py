@@ -306,7 +306,9 @@ class AcornAgent:
         return self.ui.permission_prompt(tool_name, details)
 
     def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
-        """Streams a response, handling both text and tool calls."""
+        """Streams a response, collecting text silently with a spinner."""
+        spinner = Spinner()
+        spinner.start()
         try:
             response_stream = self.client.models.generate_content_stream(
                 model=model,
@@ -316,28 +318,22 @@ class AcornAgent:
 
             full_text = ""
             all_parts = []
-            streaming_text = False
 
             for chunk in response_stream:
                 if not chunk.candidates:
                     continue
                 for part in chunk.candidates[0].content.parts:
                     if part.text:
-                        if not streaming_text:
-                            self.ui.stream_start()
-                            streaming_text = True
-                        self.ui.stream_chunk(part.text)
                         full_text += part.text
                     if part.function_call:
                         all_parts.append(part)
-
-            if streaming_text:
-                self.ui.stream_end()
 
             return full_text, all_parts
 
         except Exception as e:
             raise e
+        finally:
+            spinner.stop()
 
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
         """Executes tool calls with auto-retry on failure."""
