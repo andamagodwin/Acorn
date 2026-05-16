@@ -2,7 +2,7 @@
 
 **An autonomous coding agent that lives in your terminal.**
 
-Acorn reads your code, writes files, runs commands, and refactors across your entire codebase — powered by Google's Gemini via Vertex AI.
+Acorn reads your code, writes files, runs commands, and refactors across your entire codebase — powered by Google's Gemini 3.1 Pro via Vertex AI.
 
 ```
      █████╗  ██████╗ ██████╗ ██████╗ ███╗   ██╗
@@ -285,7 +285,7 @@ acorn/
 
 | Model | Input | Output | Typical session |
 |-------|-------|--------|-----------------|
-| Gemini 2.5 Pro | $1.25/M tokens | $10.00/M tokens | $0.50–$2.00 |
+| Gemini 3.1 Pro | $1.25/M tokens | $10.00/M tokens | $0.50–$2.00 |
 | Gemini 2.5 Flash | $0.15/M tokens | $0.60/M tokens | $0.02–$0.10 |
 
 Smart routing saves ~70% by using Flash for greetings, questions, and simple lookups.
@@ -299,7 +299,7 @@ Use `/cost` to see your spending mid-session.
 | Problem | Fix |
 |---------|-----|
 | `ModuleNotFoundError: No module named 'acorn'` | Run `pip install -e .` from the acorn directory |
-| `404 NOT_FOUND` model error | Model not available in your region. Use `gemini-2.5-pro` or `gemini-2.5-flash` |
+| `404 NOT_FOUND` model error | Gemini 3.1 requires `location="global"` (already set). If using 2.5 models only, you can use `us-central1` |
 | `Permission denied` on gcloud | Run `gcloud auth application-default login` |
 | `Vertex AI API not enabled` | Run `gcloud services enable aiplatform.googleapis.com` |
 | Session won't resume | Delete `~/.acorn/sessions/` and restart |

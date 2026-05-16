@@ -2,7 +2,7 @@
 # Drop this as .acorn.toml in any project root to customize behavior
 
 [model]
-pro = "gemini-2.5-pro"
+pro = "gemini-3.1-pro-preview"
 flash = "gemini-2.5-flash"
 temperature = 0.2
 max_output_tokens = 65536
