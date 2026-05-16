@@ -1,5 +1,6 @@
 """Acorn Agent — orchestrates tools, context, planning, and streaming."""
 import json
+import signal
 import base64
 import traceback
 from pathlib import Path
@@ -381,6 +382,8 @@ class AcornAgent:
 
             return full_text, all_parts
 
+        except KeyboardInterrupt:
+            raise
         except Exception as e:
             raise e
         finally:
@@ -615,7 +618,14 @@ class AcornAgent:
         self.ui.info("Type /help for commands, /exit to quit\n")
 
         while True:
-            user_input = self.ui.user_prompt()
+            try:
+                user_input = self.ui.user_prompt()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                if self.costs.total_cost > 0:
+                    self.ui.info(f"Session cost: {self.costs.format_cost()}")
+                self.ui.success("See you later.")
+                break
 
             if not user_input.strip():
                 continue
@@ -691,6 +701,11 @@ class AcornAgent:
                 self.ui.success("Smart routing enabled.")
                 continue
 
-            response = self.chat(user_input)
-            if not self.settings.streaming:
-                self.ui.acorn_response(response)
+            try:
+                response = self.chat(user_input)
+                if not self.settings.streaming:
+                    self.ui.acorn_response(response)
+            except KeyboardInterrupt:
+                print(f"\033[0m")
+                self.ui.info("Cancelled.")
+                continue

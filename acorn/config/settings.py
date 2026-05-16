@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+VERSION = "2.1.0"
+
 ACORN_HOME = Path.home() / ".acorn"
 SESSIONS_DIR = ACORN_HOME / "sessions"
 
@@ -17,10 +19,28 @@ AVAILABLE_MODELS = {
 }
 
 
+def _get_project_id() -> str:
+    """Reads GCP project ID from env var, falling back to ~/.acorn/config."""
+    env_val = os.environ.get("ACORN_PROJECT") or os.environ.get("GCP_PROJECT") or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    if env_val:
+        return env_val
+
+    config_file = ACORN_HOME / "config.json"
+    if config_file.exists():
+        try:
+            data = json.loads(config_file.read_text())
+            if "project" in data:
+                return data["project"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    return ""
+
+
 @dataclass
 class AcornSettings:
     # Vertex AI
-    project: str = "your-gcp-project-id"
+    project: str = field(default_factory=_get_project_id)
     location: str = "global"
     model: str = "gemini-3.1-pro-preview"
     flash_model: str = "gemini-3-flash-preview"
@@ -116,3 +136,15 @@ class AcornSettings:
         if any(complex_indicators):
             return False
         return any(simple_indicators)
+
+    def save_project_id(self, project_id: str):
+        """Saves the project ID to ~/.acorn/config.json for future use."""
+        config_file = ACORN_HOME / "config.json"
+        data = {}
+        if config_file.exists():
+            try:
+                data = json.loads(config_file.read_text())
+            except json.JSONDecodeError:
+                pass
+        data["project"] = project_id
+        config_file.write_text(json.dumps(data, indent=2))
