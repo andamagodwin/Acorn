@@ -1,11 +1,15 @@
 """Acorn Agent — orchestrates tools, context, planning, and streaming."""
 import json
+import base64
 import traceback
+from pathlib import Path
 from google import genai
 from google.genai import types
 
 from acorn.config.settings import AcornSettings
+from acorn.config.project_config import load_project_config, apply_project_config
 from acorn.core.context import ContextManager
+from acorn.core.costs import CostTracker
 from acorn.core.planner import Planner
 from acorn.core.session import SessionManager
 from acorn.core.router import ModelRouter
@@ -24,6 +28,7 @@ SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on 
 - Understand git state and project structure
 - Plan and execute multi-step tasks
 - Refactor across multiple files in a single session
+- Analyze images and screenshots provided by the user
 
 ## Operating Principles
 1. ALWAYS read a file before editing it — never guess at contents
@@ -54,17 +59,29 @@ SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on 
 - Admit when you're unsure — don't hallucinate file contents
 """
 
+IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+
 
 class AcornAgent:
     """The main agent class — streaming, smart routing, auto-retry, session persistence."""
 
     def __init__(self, settings: AcornSettings | None = None):
         self.settings = settings or AcornSettings()
+
+        # Load project-level config (.acorn.toml)
+        project_config = load_project_config(self.settings.working_dir)
+        if project_config:
+            apply_project_config(self.settings, project_config)
+            self._has_project_config = True
+        else:
+            self._has_project_config = False
+
         self.ui = TerminalUI()
         self.context = ContextManager(
             max_tokens=self.settings.max_context_tokens,
             compaction_ratio=self.settings.compaction_threshold,
         )
+        self.costs = CostTracker()
         self.planner = Planner()
         self.runner = CommandRunner(self.settings.working_dir)
         self.git = GitTools(self.settings.working_dir)
@@ -175,7 +192,7 @@ class AcornAgent:
                 ),
                 types.FunctionDeclaration(
                     name="multi_edit",
-                    description="Reads multiple files at once for understanding before making changes. Use this when you need to understand relationships between files.",
+                    description="Reads multiple files at once for understanding before making changes.",
                     parameters=types.Schema(
                         type="OBJECT",
                         properties={
@@ -192,7 +209,6 @@ class AcornAgent:
         ]
 
     def _build_tool_map(self) -> dict:
-        """Maps tool names to their execution functions."""
         return {
             "read_file": self._exec_read_file,
             "write_file": self._exec_write_file,
@@ -252,7 +268,6 @@ class AcornAgent:
         return self.git.project_summary()
 
     def _exec_multi_read(self, args: dict) -> str:
-        """Reads multiple files and returns their contents together."""
         filepaths = args.get("filepaths", [])
         results = []
         for fp in filepaths[:10]:
@@ -261,8 +276,6 @@ class AcornAgent:
         return "\n\n".join(results)
 
     def _backup_file(self, filepath: str) -> None:
-        """Stores file content before modification for undo support."""
-        from pathlib import Path
         path = Path(filepath)
         content = None
         if path.exists():
@@ -279,8 +292,6 @@ class AcornAgent:
             self._file_backups = self._file_backups[-20:]
 
     def undo_last(self) -> str:
-        """Reverts the last file change."""
-        from pathlib import Path
         if not self._file_backups:
             return "Nothing to undo."
         backup = self._file_backups.pop()
@@ -304,6 +315,46 @@ class AcornAgent:
             self.ui.error(f"Tool '{tool_name}' is blocked by permission rules.")
             return False
         return self.ui.permission_prompt(tool_name, details)
+
+    # --- Multimodal support ---
+
+    def _parse_image_from_message(self, message: str) -> tuple[str, list]:
+        """Checks if the message references an image file and loads it."""
+        parts = []
+        text_parts = []
+
+        words = message.split()
+        for word in words:
+            # Check if word looks like a file path to an image
+            path = Path(word)
+            if not path.is_absolute():
+                path = Path(self.settings.working_dir) / word
+            if path.exists() and path.suffix.lower() in IMAGE_EXTENSIONS:
+                try:
+                    image_data = path.read_bytes()
+                    mime_type = self._get_mime_type(path.suffix.lower())
+                    parts.append(types.Part.from_bytes(data=image_data, mime_type=mime_type))
+                    self.ui.info(f"Attached image: {path.name}")
+                except Exception:
+                    text_parts.append(word)
+            else:
+                text_parts.append(word)
+
+        clean_text = " ".join(text_parts)
+        return clean_text, parts
+
+    def _get_mime_type(self, ext: str) -> str:
+        mime_map = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.bmp': 'image/bmp',
+        }
+        return mime_map.get(ext, 'image/png')
+
+    # --- Streaming ---
 
     def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
         """Streams a response, collecting text silently with a spinner."""
@@ -336,7 +387,6 @@ class AcornAgent:
             spinner.stop()
 
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
-        """Executes tool calls with auto-retry on failure."""
         tool_results = []
         had_errors = False
 
@@ -372,16 +422,21 @@ class AcornAgent:
 
     def chat(self, user_message: str) -> str:
         """Sends a message and handles streaming + tool loop + auto-retry."""
-        self.context.add("user", user_message)
+        # Check for image attachments
+        clean_text, image_parts = self._parse_image_from_message(user_message)
+        display_text = clean_text if clean_text else user_message
 
-        model = self.router.route(user_message)
+        self.context.add("user", display_text)
+
+        model = self.router.route(display_text)
         if model == self.settings.flash_model:
             self.ui.info(f"[Flash mode]")
         else:
             self.ui.info(f"[Pro mode]")
 
+        # Build message history
         contents = []
-        for msg in self.context.messages:
+        for msg in self.context.messages[:-1]:  # all but the current one
             if msg.role == "user":
                 contents.append(types.Content(
                     role="user",
@@ -392,6 +447,15 @@ class AcornAgent:
                     role="model",
                     parts=[types.Part.from_text(text=msg.content)],
                 ))
+
+        # Current message with potential image parts
+        current_parts = []
+        if clean_text:
+            current_parts.append(types.Part.from_text(text=clean_text))
+        elif user_message:
+            current_parts.append(types.Part.from_text(text=user_message))
+        current_parts.extend(image_parts)
+        contents.append(types.Content(role="user", parts=current_parts))
 
         config = types.GenerateContentConfig(
             system_instruction=SYSTEM_PROMPT,
@@ -433,6 +497,10 @@ class AcornAgent:
                     continue
                 return error_msg
 
+            # Track costs
+            input_size = sum(len(m.content) for m in self.context.messages)
+            self.costs.estimate_from_text(model, "x" * input_size, full_text)
+
             if tool_parts:
                 model_content_parts = []
                 if full_text:
@@ -463,6 +531,9 @@ class AcornAgent:
                 if self.settings.streaming:
                     self.ui.stream_response_formatted(final_text)
 
+                # Show cost after response
+                self.ui.cost_inline(self.costs.format_cost())
+
                 if self.settings.persist_sessions:
                     self._save_session()
 
@@ -475,7 +546,6 @@ class AcornAgent:
         return "Error: Reached maximum iterations. Task may be too complex for a single turn."
 
     def _summarize(self, text: str) -> str:
-        """Uses Flash model to summarize."""
         try:
             response = self.client.models.generate_content(
                 model=self.settings.flash_model,
@@ -495,7 +565,6 @@ class AcornAgent:
             return text[:2000]
 
     def _save_session(self) -> None:
-        """Persists the current conversation."""
         messages = [
             {"role": m.role, "content": m.content}
             for m in self.context.messages
@@ -503,10 +572,10 @@ class AcornAgent:
         self.session.save(messages, metadata={
             "router_stats": self.router.stats,
             "compactions": self.context.compaction_count,
+            "costs": self.costs.session_summary,
         })
 
     def _load_session(self) -> bool:
-        """Loads a previous session if available."""
         messages = self.session.load()
         if not messages:
             return False
@@ -514,8 +583,9 @@ class AcornAgent:
             self.context.add(msg["role"], msg["content"])
         return True
 
+    # --- Main Interactive Loop ---
+
     def run(self):
-        """Main interactive loop with all features."""
         self.ui.banner()
 
         if self.git.is_repo:
@@ -525,6 +595,9 @@ class AcornAgent:
             self.ui.info(f"Directory: {self.settings.working_dir}")
 
         self.ui.info(f"Model:   {self.settings.model} | Flash: {self.settings.flash_model}")
+
+        if self._has_project_config:
+            self.ui.success("Loaded .acorn.toml config")
 
         if self.settings.persist_sessions and self.session.has_previous_session:
             self.ui.info("Previous session found.")
@@ -550,11 +623,14 @@ class AcornAgent:
             cmd = user_input.strip().lower()
 
             if cmd in ('exit', 'quit', '/exit', '/quit'):
+                if self.costs.total_cost > 0:
+                    self.ui.info(f"Session cost: {self.costs.format_cost()}")
                 self.ui.success("See you later.")
                 break
             elif cmd == '/clear':
                 self.context.clear()
                 self.session.clear()
+                self.costs = CostTracker()
                 self.ui.success("Context cleared.")
                 continue
             elif cmd == '/help':
@@ -567,6 +643,10 @@ class AcornAgent:
                 else:
                     self.ui.info("No active plan.")
                 continue
+            elif cmd == '/cost':
+                summary = self.costs.session_summary
+                self.ui.show_cost(summary)
+                continue
             elif cmd == '/status':
                 self.ui.show_status({
                     "tokens": self.context.total_tokens,
@@ -576,6 +656,7 @@ class AcornAgent:
                     "flash_model": self.router.flash_model,
                     "routing": self.router.stats,
                     "backups": len(self._file_backups),
+                    "cost": self.costs.format_cost(),
                 })
                 continue
             elif cmd == '/undo':

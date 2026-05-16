@@ -9,11 +9,10 @@ ACORN_HOME = Path.home() / ".acorn"
 SESSIONS_DIR = ACORN_HOME / "sessions"
 
 AVAILABLE_MODELS = {
-    "gemini-2.5-pro": "Gemini 2.5 Pro — best quality, complex tasks",
-    "gemini-2.5-flash": "Gemini 2.5 Flash — fast and efficient",
-    "gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite — most affordable, high-volume agents",
-    "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview — next-gen, complex agentic workloads",
-    "gemini-3-flash-preview": "Gemini 3 Flash Preview — enhanced multimodal and coding",
+    "gemini-2.5-pro": "Gemini 2.5 Pro — best quality, complex tasks (default)",
+    "gemini-2.5-flash": "Gemini 2.5 Flash — fast and efficient (default flash)",
+    "gemini-2.0-flash": "Gemini 2.0 Flash — lightweight and quick",
+    "gemini-2.5-flash-lite-preview-06-17": "Gemini 2.5 Flash Lite — cheapest option",
 }
 
 
@@ -22,8 +21,8 @@ class AcornSettings:
     # Vertex AI
     project: str = "your-gcp-project-id"
     location: str = "us-central1"
-    model: str = "gemini-3.1-pro-preview"
-    flash_model: str = "gemini-3.1-flash-lite"
+    model: str = "gemini-2.5-pro"
+    flash_model: str = "gemini-2.5-flash"
 
     # Smart routing
     use_smart_routing: bool = True

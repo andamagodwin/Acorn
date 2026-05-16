@@ -393,6 +393,7 @@ class TerminalUI:
   {C}Commands{R}
   {D}{'─' * 40}{R}
   {C}/model <name>{R}  Change model (or list models)
+  {C}/cost{R}         Show session cost breakdown
   {C}/status{R}       Show session stats
   {C}/plan{R}         Show current plan
   {C}/undo{R}         Revert last file change
@@ -400,6 +401,12 @@ class TerminalUI:
   {C}/sessions{R}     List saved sessions
   {C}/routing on|off{R}  Toggle smart routing
   {C}/exit{R}         Quit
+
+  {C}Tips{R}
+  {D}{'─' * 40}{R}
+  Attach images: just include the path in your message
+  e.g. "what's in screenshot.png"
+  Project config: drop a .acorn.toml in your repo root
 """)
 
     def show_status(self, stats: dict):
@@ -415,6 +422,7 @@ class TerminalUI:
   Flash model: {stats['flash_model']}
   Routing:     Pro={stats['routing']['pro_calls']} Flash={stats['routing']['flash_calls']}
   Undo stack:  {stats['backups']} backups
+  Session cost: {stats.get('cost', '$0.00')}
 """)
 
     def show_models(self, available: dict, current_pro: str, current_flash: str):
@@ -433,5 +441,24 @@ class TerminalUI:
             print(f"  {Colors.CYAN}{model_id:<32}{R}{D}{desc}{R}{marker}")
         print(f"\n  {D}Use: /model <name> to switch{R}\n")
 
-    def cost_display(self, stats: dict):
-        print(f"  {Colors.DIM}Pro: {stats['pro_calls']} | Flash: {stats['flash_calls']} | {stats['estimated_savings']}{Colors.RESET}")
+    def cost_inline(self, cost_str: str):
+        """Shows cost after each response, subtle."""
+        print(f"  {Colors.DIM}[{cost_str}]{Colors.RESET}")
+
+    def show_cost(self, summary: dict):
+        """Detailed cost breakdown."""
+        C = Colors.AMBER
+        R = Colors.RESET
+        D = Colors.DIM
+        total = summary['total_cost']
+        print(f"""
+  {C}Session Cost{R}
+  {D}{'─' * 40}{R}
+  API calls:     {summary['total_calls']}
+  Pro calls:     {summary['pro_calls']}
+  Flash calls:   {summary['flash_calls']}
+  Input tokens:  ~{summary['input_tokens']:,}
+  Output tokens: ~{summary['output_tokens']:,}
+  {D}{'─' * 40}{R}
+  {C}Total: ~${total:.4f}{R}
+""")

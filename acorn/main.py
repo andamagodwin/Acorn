@@ -21,8 +21,8 @@ def main():
 \033[1mUsage:\033[0m acorn [options]
 
 \033[1mOptions:\033[0m
-  --model <name>     Set the Pro model (default: gemini-3.1-pro-preview)
-  --flash <name>     Set the Flash model (default: gemini-3.1-flash-lite)
+  --model <name>     Set the Pro model (default: gemini-2.5-pro)
+  --flash <name>     Set the Flash model (default: gemini-2.5-flash)
   --no-stream        Disable streaming (wait for full response)
   --no-routing       Disable smart routing (always use Pro)
   --no-session       Disable session persistence

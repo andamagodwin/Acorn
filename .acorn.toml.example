@@ -1,0 +1,23 @@
+# Acorn project configuration
+# Drop this as .acorn.toml in any project root to customize behavior
+
+[model]
+pro = "gemini-2.5-pro"
+flash = "gemini-2.5-flash"
+temperature = 0.2
+max_output_tokens = 65536
+
+[routing]
+enabled = true
+threshold = 200
+
+[project]
+gcp_project = "your-gcp-project-id"
+location = "us-central1"
+
+[permissions]
+# Extra commands that are safe to auto-run in this project
+safe_commands = [
+    "npm run", "npm test", "cargo build", "cargo test",
+    "python -m pytest", "make",
+]
