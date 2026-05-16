@@ -1,2 +1,2 @@
 [console_scripts]
-acorn = nova.main:main
+acorn = acorn.main:main

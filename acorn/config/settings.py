@@ -1,16 +1,24 @@
-"""Nova configuration and settings."""
+"""Acorn configuration and settings."""
 import os
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 
-NOVA_HOME = Path.home() / ".nova"
-SESSIONS_DIR = NOVA_HOME / "sessions"
+ACORN_HOME = Path.home() / ".acorn"
+SESSIONS_DIR = ACORN_HOME / "sessions"
+
+AVAILABLE_MODELS = {
+    "gemini-2.5-pro": "Gemini 2.5 Pro — best quality, complex tasks",
+    "gemini-2.5-flash": "Gemini 2.5 Flash — fast and efficient",
+    "gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite — most affordable, high-volume agents",
+    "gemini-3.1-pro-preview": "Gemini 3.1 Pro Preview — next-gen, complex agentic workloads",
+    "gemini-3-flash-preview": "Gemini 3 Flash Preview — enhanced multimodal and coding",
+}
 
 
 @dataclass
-class NovaSettings:
+class AcornSettings:
     # Vertex AI
     project: str = "your-gcp-project-id"
     location: str = "us-central1"
@@ -19,7 +27,7 @@ class NovaSettings:
 
     # Smart routing
     use_smart_routing: bool = True
-    routing_threshold: int = 200  # messages under this char count use Flash
+    routing_threshold: int = 200
 
     # Agent behavior
     max_context_tokens: int = 900_000
@@ -68,7 +76,7 @@ class NovaSettings:
     compaction_threshold: float = 0.75
 
     def __post_init__(self):
-        NOVA_HOME.mkdir(parents=True, exist_ok=True)
+        ACORN_HOME.mkdir(parents=True, exist_ok=True)
         SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
     def is_command_safe(self, command: str) -> bool:
@@ -89,7 +97,6 @@ class NovaSettings:
         """Determines if a message is simple enough for Flash model."""
         if not self.use_smart_routing:
             return False
-        # Short messages, simple questions, greetings → Flash
         simple_indicators = [
             len(message) < self.routing_threshold,
             message.strip().endswith("?") and len(message) < 100,
@@ -98,7 +105,6 @@ class NovaSettings:
                 "how do i", "what does", "why", "when",
             ]),
         ]
-        # Complex indicators → Pro
         complex_indicators = [
             "refactor" in message.lower(),
             "across all" in message.lower(),

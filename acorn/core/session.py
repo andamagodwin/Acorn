@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 from pathlib import Path
 
-from nova.config.settings import SESSIONS_DIR
+from acorn.config.settings import SESSIONS_DIR
 
 
 class SessionManager:

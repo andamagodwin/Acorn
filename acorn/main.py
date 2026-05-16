@@ -1,30 +1,26 @@
 #!/usr/bin/env python3
-"""Quick launcher — run this from anywhere."""
+"""Acorn Agent — entry point for the `acorn` CLI command."""
 import sys
 import os
-
-# Ensure the project root is in the path
-project_root = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, project_root)
-
-from nova.core.agent import NovaAgent
-from nova.config.settings import NovaSettings
 
 
 def main():
     working_dir = os.getcwd()
-    settings = NovaSettings(working_dir=working_dir)
 
-    # CLI argument overrides
+    from acorn.config.settings import AcornSettings, AVAILABLE_MODELS
+    from acorn.core.agent import AcornAgent
+
+    settings = AcornSettings(working_dir=working_dir)
+
     args = sys.argv[1:]
 
     if "--help" in args or "-h" in args:
         print("""
-Nova v2.0 — Autonomous Coding Agent
+\033[38;2;139;90;43m Acorn v2.0\033[0m — Autonomous Coding Agent
 
-Usage: nova [options]
+\033[1mUsage:\033[0m acorn [options]
 
-Options:
+\033[1mOptions:\033[0m
   --model <name>     Set the Pro model (default: gemini-2.5-pro)
   --flash <name>     Set the Flash model (default: gemini-2.5-flash)
   --no-stream        Disable streaming (wait for full response)
@@ -32,8 +28,16 @@ Options:
   --no-session       Disable session persistence
   --unsafe           Auto-approve all actions (dangerous!)
   --project <id>     Override GCP project ID
+  --models           List available models
   -h, --help         Show this help
         """)
+        return
+
+    if "--models" in args:
+        print("\n\033[1mAvailable Models:\033[0m\n")
+        for model_id, description in AVAILABLE_MODELS.items():
+            print(f"  \033[36m{model_id:<30}\033[0m {description}")
+        print()
         return
 
     if "--model" in args:
@@ -62,9 +66,9 @@ Options:
 
     if "--unsafe" in args:
         settings.permission_rules = {k: "safe" for k in settings.permission_rules}
-        print("⚠️  Running in UNSAFE mode — all actions auto-approved!")
+        print("\033[33m  Warning: Running in UNSAFE mode — all actions auto-approved!\033[0m")
 
-    agent = NovaAgent(settings=settings)
+    agent = AcornAgent(settings=settings)
     agent.run()
 
 

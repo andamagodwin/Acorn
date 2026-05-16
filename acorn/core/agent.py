@@ -1,18 +1,18 @@
-"""The Nova Agent brain — orchestrates tools, context, planning, and streaming."""
+"""Acorn Agent — orchestrates tools, context, planning, and streaming."""
 import json
 import traceback
 from google import genai
 from google.genai import types
 
-from nova.config.settings import NovaSettings
-from nova.core.context import ContextManager
-from nova.core.planner import Planner
-from nova.core.session import SessionManager
-from nova.core.router import ModelRouter
-from nova.tools.filesystem import read_file, write_file, edit_file, list_directory, search_files
-from nova.tools.terminal import CommandRunner
-from nova.tools.git_tools import GitTools
-from nova.ui.terminal_ui import TerminalUI, Spinner
+from acorn.config.settings import AcornSettings
+from acorn.core.context import ContextManager
+from acorn.core.planner import Planner
+from acorn.core.session import SessionManager
+from acorn.core.router import ModelRouter
+from acorn.tools.filesystem import read_file, write_file, edit_file, list_directory, search_files
+from acorn.tools.terminal import CommandRunner
+from acorn.tools.git_tools import GitTools
+from acorn.ui.terminal_ui import TerminalUI, Spinner
 
 
 SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on the user's local machine.
@@ -55,11 +55,11 @@ SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on 
 """
 
 
-class NovaAgent:
+class AcornAgent:
     """The main agent class — streaming, smart routing, auto-retry, session persistence."""
 
-    def __init__(self, settings: NovaSettings | None = None):
-        self.settings = settings or NovaSettings()
+    def __init__(self, settings: AcornSettings | None = None):
+        self.settings = settings or AcornSettings()
         self.ui = TerminalUI()
         self.context = ContextManager(
             max_tokens=self.settings.max_context_tokens,
@@ -74,17 +74,14 @@ class NovaAgent:
             flash_model=self.settings.flash_model,
         )
 
-        # Track file changes for undo
         self._file_backups: list[dict] = []
 
-        # Initialize Vertex AI client
         self.client = genai.Client(
             vertexai=True,
             project=self.settings.project,
             location=self.settings.location,
         )
 
-        # Build tool declarations
         self._tools = self._build_tools()
         self._tool_map = self._build_tool_map()
 
@@ -207,8 +204,6 @@ class NovaAgent:
             "multi_edit": self._exec_multi_read,
         }
 
-    # --- Tool Executors ---
-
     def _exec_read_file(self, args: dict) -> str:
         return read_file(
             args["filepath"],
@@ -220,7 +215,6 @@ class NovaAgent:
         filepath = args["filepath"]
         if not self._check_permission("write_file", filepath):
             return "Permission denied by user."
-        # Backup for undo
         self._backup_file(filepath)
         return write_file(filepath, args["content"])
 
@@ -228,7 +222,6 @@ class NovaAgent:
         filepath = args["filepath"]
         if not self._check_permission("edit_file", filepath):
             return "Permission denied by user."
-        # Backup for undo
         self._backup_file(filepath)
         return edit_file(filepath, args["old_string"], args["new_string"])
 
@@ -262,12 +255,10 @@ class NovaAgent:
         """Reads multiple files and returns their contents together."""
         filepaths = args.get("filepaths", [])
         results = []
-        for fp in filepaths[:10]:  # cap at 10 files
+        for fp in filepaths[:10]:
             content = read_file(fp)
-            results.append(f"{'='*60}\n📄 {fp}\n{'='*60}\n{content}")
+            results.append(f"{'='*60}\n {fp}\n{'='*60}\n{content}")
         return "\n\n".join(results)
-
-    # --- File Backup for Undo ---
 
     def _backup_file(self, filepath: str) -> None:
         """Stores file content before modification for undo support."""
@@ -284,7 +275,6 @@ class NovaAgent:
             "content": content,
             "existed": path.exists(),
         })
-        # Keep only last 20 backups
         if len(self._file_backups) > 20:
             self._file_backups = self._file_backups[-20:]
 
@@ -296,19 +286,15 @@ class NovaAgent:
         backup = self._file_backups.pop()
         filepath = backup["filepath"]
         if not backup["existed"]:
-            # File didn't exist before — delete it
             path = Path(filepath)
             if path.exists():
                 path.unlink()
                 return f"Undo: Deleted {filepath} (was newly created)"
             return f"Undo: {filepath} already gone."
         else:
-            # Restore previous content
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write(backup["content"])
             return f"Undo: Restored {filepath} to previous state."
-
-    # --- Permission System ---
 
     def _check_permission(self, tool_name: str, details: str) -> bool:
         rule = self.settings.permission_rules.get(tool_name, "ask")
@@ -318,8 +304,6 @@ class NovaAgent:
             self.ui.error(f"Tool '{tool_name}' is blocked by permission rules.")
             return False
         return self.ui.permission_prompt(tool_name, details)
-
-    # --- Streaming Response ---
 
     def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
         """Streams a response, handling both text and tool calls."""
@@ -355,8 +339,6 @@ class NovaAgent:
         except Exception as e:
             raise e
 
-    # --- Auto-Retry Logic ---
-
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
         """Executes tool calls with auto-retry on failure."""
         tool_results = []
@@ -370,15 +352,12 @@ class NovaAgent:
             tool_name = fc.name
             args = dict(fc.args) if fc.args else {}
 
-            # Display tool call
             args_display = ", ".join(f"{k}={repr(v)[:60]}" for k, v in args.items())
             self.ui.tool_call(tool_name, args_display)
 
-            # Execute with retry
             executor = self._tool_map.get(tool_name)
             if executor:
                 result = executor(args)
-                # Check if it failed
                 if result.startswith("Error"):
                     had_errors = True
                     self.ui.tool_result(f"[FAILED] {result}")
@@ -395,20 +374,16 @@ class NovaAgent:
 
         return tool_results, had_errors
 
-    # --- Main Chat Method ---
-
     def chat(self, user_message: str) -> str:
         """Sends a message and handles streaming + tool loop + auto-retry."""
         self.context.add("user", user_message)
 
-        # Smart routing: pick the right model
         model = self.router.route(user_message)
         if model == self.settings.flash_model:
-            self.ui.info(f"[⚡ Flash mode — simple query]")
+            self.ui.info(f"[Flash mode]")
         else:
-            self.ui.info(f"[🧠 Pro mode — complex task]")
+            self.ui.info(f"[Pro mode]")
 
-        # Build message history
         contents = []
         for msg in self.context.messages:
             if msg.role == "user":
@@ -429,7 +404,6 @@ class NovaAgent:
             max_output_tokens=self.settings.max_output_tokens,
         )
 
-        # Agentic loop with streaming
         max_iterations = 25
         iteration = 0
         retry_count = 0
@@ -464,7 +438,6 @@ class NovaAgent:
                 return error_msg
 
             if tool_parts:
-                # Build the model's response content for history
                 model_content_parts = []
                 if full_text:
                     model_content_parts.append(types.Part.from_text(text=full_text))
@@ -475,38 +448,30 @@ class NovaAgent:
                     parts=model_content_parts,
                 ))
 
-                # Execute tools with auto-retry awareness
                 tool_results, had_errors = self._handle_tool_calls_with_retry(
                     tool_parts, contents, config, model
                 )
 
-                # Add tool results
                 contents.append(types.Content(
                     role="user",
                     parts=tool_results,
                 ))
 
-                # If there were errors and auto-retry is on, the model will
-                # naturally see the error and adapt on the next iteration
                 if had_errors and self.settings.auto_retry_on_error:
-                    self.ui.info("[Auto-retry: letting Nova adapt to the error...]")
+                    self.ui.info("[Adapting to error...]")
 
             else:
-                # Final text response (no tool calls)
                 final_text = full_text or "(No response)"
                 self.context.add("model", final_text)
 
-                # If streamed, re-render with markdown formatting
                 if self.settings.streaming:
                     self.ui.stream_response_formatted(final_text)
 
-                # Persist session
                 if self.settings.persist_sessions:
                     self._save_session()
 
-                # Handle context compaction
                 if self.context.needs_compaction:
-                    self.ui.info("[Compacting context to stay within limits...]")
+                    self.ui.info("[Compacting context...]")
                     self.context.compact(self._summarize)
 
                 return final_text
@@ -514,7 +479,7 @@ class NovaAgent:
         return "Error: Reached maximum iterations. Task may be too complex for a single turn."
 
     def _summarize(self, text: str) -> str:
-        """Uses Flash model to summarize (cheaper than Pro for meta-tasks)."""
+        """Uses Flash model to summarize."""
         try:
             response = self.client.models.generate_content(
                 model=self.settings.flash_model,
@@ -549,38 +514,36 @@ class NovaAgent:
         messages = self.session.load()
         if not messages:
             return False
-        for msg in messages[-20:]:  # load last 20 messages max
+        for msg in messages[-20:]:
             self.context.add(msg["role"], msg["content"])
         return True
-
-    # --- Main Interactive Loop ---
 
     def run(self):
         """Main interactive loop with all features."""
         self.ui.banner()
 
-        # Show project context
         if self.git.is_repo:
-            self.ui.info(f"📁 Project: {self.settings.working_dir}")
-            self.ui.info(f"🌿 Branch: {self.git.current_branch()}")
+            self.ui.info(f"Project: {self.settings.working_dir}")
+            self.ui.info(f"Branch:  {self.git.current_branch()}")
         else:
-            self.ui.info(f"📁 Working directory: {self.settings.working_dir}")
+            self.ui.info(f"Directory: {self.settings.working_dir}")
 
-        # Offer to resume previous session
+        self.ui.info(f"Model:   {self.settings.model} | Flash: {self.settings.flash_model}")
+
         if self.settings.persist_sessions and self.session.has_previous_session:
-            self.ui.info("💾 Previous session found for this directory.")
+            self.ui.info("Previous session found.")
             try:
                 resume = input(f"  Resume? [y/N]: ").strip().lower()
                 if resume in ('y', 'yes'):
                     if self._load_session():
-                        self.ui.success(f"Resumed session ({len(self.context.messages)} messages loaded)")
+                        self.ui.success(f"Resumed ({len(self.context.messages)} messages)")
                     else:
                         self.ui.info("Could not load session, starting fresh.")
             except (EOFError, KeyboardInterrupt):
                 pass
 
-        self.ui.info("Commands: /clear /plan /status /undo /sessions /model /exit")
-        self.ui.info(f"Smart routing: {'ON' if self.settings.use_smart_routing else 'OFF'} | Streaming: {'ON' if self.settings.streaming else 'OFF'}\n")
+        self.ui.divider()
+        self.ui.info("Type /help for commands, /exit to quit\n")
 
         while True:
             user_input = self.ui.user_prompt()
@@ -590,14 +553,16 @@ class NovaAgent:
 
             cmd = user_input.strip().lower()
 
-            # Slash commands
             if cmd in ('exit', 'quit', '/exit', '/quit'):
-                self.ui.success("Acorn signing off. 🌰")
+                self.ui.success("See you later.")
                 break
             elif cmd == '/clear':
                 self.context.clear()
                 self.session.clear()
-                self.ui.success("Context and session cleared.")
+                self.ui.success("Context cleared.")
+                continue
+            elif cmd == '/help':
+                self.ui.show_help()
                 continue
             elif cmd == '/plan':
                 plan = self.planner.progress_display
@@ -607,11 +572,15 @@ class NovaAgent:
                     self.ui.info("No active plan.")
                 continue
             elif cmd == '/status':
-                self.ui.info(f"Context: ~{self.context.total_tokens} tokens")
-                self.ui.info(f"Messages: {len(self.context.messages)}")
-                self.ui.info(f"Compactions: {self.context.compaction_count}")
-                self.ui.info(f"Model routing: {self.router.stats}")
-                self.ui.info(f"File backups (undo): {len(self._file_backups)}")
+                self.ui.show_status({
+                    "tokens": self.context.total_tokens,
+                    "messages": len(self.context.messages),
+                    "compactions": self.context.compaction_count,
+                    "pro_model": self.router.pro_model,
+                    "flash_model": self.router.flash_model,
+                    "routing": self.router.stats,
+                    "backups": len(self._file_backups),
+                })
                 continue
             elif cmd == '/undo':
                 result = self.undo_last()
@@ -621,7 +590,7 @@ class NovaAgent:
                 sessions = self.session.list_sessions()
                 if sessions:
                     for s in sessions[:10]:
-                        self.ui.info(f"  {s['id']} — {s['dir']} ({s['messages']} msgs, {s['updated']})")
+                        self.ui.info(f"  {s['id']} — {s['dir']} ({s['messages']} msgs)")
                 else:
                     self.ui.info("No saved sessions.")
                 continue
@@ -631,21 +600,20 @@ class NovaAgent:
                     new_model = parts[1]
                     self.settings.model = new_model
                     self.router.pro_model = new_model
-                    self.ui.success(f"Pro model changed to: {new_model}")
+                    self.ui.success(f"Model: {new_model}")
                 else:
-                    self.ui.info(f"Current: Pro={self.router.pro_model}, Flash={self.router.flash_model}")
+                    from acorn.config.settings import AVAILABLE_MODELS
+                    self.ui.show_models(AVAILABLE_MODELS, self.router.pro_model, self.router.flash_model)
                 continue
             elif cmd == '/routing off':
                 self.settings.use_smart_routing = False
-                self.ui.success("Smart routing disabled — always using Pro.")
+                self.ui.success("Smart routing disabled.")
                 continue
             elif cmd == '/routing on':
                 self.settings.use_smart_routing = True
                 self.ui.success("Smart routing enabled.")
                 continue
 
-            # Normal message — send to agent
             response = self.chat(user_input)
             if not self.settings.streaming:
-                self.ui.nova_response(response)
-            # When streaming is on, output is already printed by stream methods
+                self.ui.acorn_response(response)

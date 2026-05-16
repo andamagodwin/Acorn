@@ -11,7 +11,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "acorn=nova.main:main",
+            "acorn=acorn.main:main",
         ],
     },
     python_requires=">=3.11",
