@@ -6,7 +6,7 @@ If you discover a security vulnerability in Acorn, please report it responsibly.
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: andamagodwin@gmail.com
+Instead, please email: andamagodwinezra@gmail.com
 
 Include:
 - Description of the vulnerability
