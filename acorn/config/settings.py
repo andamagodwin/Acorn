@@ -22,8 +22,8 @@ class AcornSettings:
     # Vertex AI
     project: str = "your-gcp-project-id"
     location: str = "us-central1"
-    model: str = "gemini-2.5-pro"
-    flash_model: str = "gemini-2.5-flash"
+    model: str = "gemini-3.1-pro-preview"
+    flash_model: str = "gemini-3.1-flash-lite"
 
     # Smart routing
     use_smart_routing: bool = True
