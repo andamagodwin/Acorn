@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acorn-agent"
+version = "2.1.0"
+description = "An autonomous coding agent that lives in your terminal — powered by Gemini 3.1 Pro"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Andama Godwin", email = "andamagodwin@gmail.com" },
+]
+keywords = ["ai", "coding-agent", "gemini", "vertex-ai", "cli", "autonomous"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Code Generators",
+    "Intended Audience :: Developers",
+    "Environment :: Console",
+]
+dependencies = [
+    "google-genai>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/andamagodwin/acorn"
+Repository = "https://github.com/andamagodwin/acorn"
+Issues = "https://github.com/andamagodwin/acorn/issues"
+
+[project.scripts]
+acorn = "acorn.main:main"
+
+[tool.setuptools.packages.find]
+include = ["acorn*"]

@@ -33,13 +33,17 @@ Acorn reads your code, writes files, runs commands, and refactors across your en
 ## Quick Start
 
 ```bash
-git clone https://github.com/andamagodwin/acorn.git
-cd acorn
-pip install -e .
+# Install from PyPI (easiest)
+pip install acorn-agent
+
+# Or install from GitHub
+pip install git+https://github.com/andamagodwin/acorn.git
+
+# Run it
 acorn
 ```
 
-That's it. Type something and it works.
+On first run it will ask for your GCP project ID. That's it.
 
 ---
 
