@@ -41,12 +41,18 @@ def main():
   --no-session       Disable session persistence
   --unsafe           Auto-approve all actions (dangerous!)
   --project <id>     Override GCP project ID
+  --key <key>        Use Gemini API key (alternative to Vertex AI)
   --models           List available models
   -v, --version      Show version
   -h, --help         Show this help
 
 \033[1mEnvironment:\033[0m
+  GEMINI_API_KEY     Gemini API key (simplest setup)
   ACORN_PROJECT      GCP project ID (or GCP_PROJECT, GOOGLE_CLOUD_PROJECT)
+
+\033[1mProject Config:\033[0m
+  .acorn.toml        Per-repo model/routing/permission config
+  .acorn.md          Per-repo instructions injected into system prompt
         """)
         return
 
@@ -59,21 +65,48 @@ def main():
 
     settings = AcornSettings(working_dir=working_dir)
 
-    # First-run: prompt for project ID if not configured
-    if not settings.project:
-        print("\033[38;2;207;155;54m  First-time setup: GCP project ID needed.\033[0m")
-        print("  \033[2mYou can also set ACORN_PROJECT env var to skip this.\033[0m\n")
+    # First-run: prompt for authentication if nothing configured
+    if not settings.api_key and not settings.project:
+        print("\033[38;2;207;155;54m  First-time setup: Authentication needed.\033[0m")
+        print("  \033[2mChoose how to connect to Gemini:\033[0m\n")
+        print("  \033[1m[1]\033[0m Gemini API key \033[2m(easiest — get one at aistudio.google.com)\033[0m")
+        print("  \033[1m[2]\033[0m Vertex AI / GCP project \033[2m(enterprise — requires gcloud setup)\033[0m")
+        print()
         try:
-            project_id = input("  Enter your GCP project ID: ").strip()
+            choice = input("  Choose [1/2]: ").strip()
         except (EOFError, KeyboardInterrupt):
-            print("\n  No project set. Exiting.")
+            print("\n  Setup cancelled. Exiting.")
             return
-        if not project_id:
-            print("  No project set. Exiting.")
+
+        if choice == "1":
+            try:
+                api_key = input("  Enter your Gemini API key: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Setup cancelled. Exiting.")
+                return
+            if not api_key:
+                print("  No key provided. Exiting.")
+                return
+            settings.api_key = api_key
+            settings.use_vertex = False
+            settings.save_api_key(api_key)
+            print(f"  \033[32mSaved to ~/.acorn/config.json\033[0m\n")
+        elif choice == "2":
+            try:
+                project_id = input("  Enter your GCP project ID: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Setup cancelled. Exiting.")
+                return
+            if not project_id:
+                print("  No project set. Exiting.")
+                return
+            settings.project = project_id
+            settings.use_vertex = True
+            settings.save_project_id(project_id)
+            print(f"  \033[32mSaved to ~/.acorn/config.json\033[0m\n")
+        else:
+            print("  Invalid choice. Exiting.")
             return
-        settings.project = project_id
-        settings.save_project_id(project_id)
-        print(f"  \033[32mSaved to ~/.acorn/config.json\033[0m\n")
 
     if "--model" in args:
         idx = args.index("--model") + 1
@@ -89,6 +122,13 @@ def main():
         idx = args.index("--project") + 1
         if idx < len(args):
             settings.project = args[idx]
+            settings.use_vertex = True
+
+    if "--key" in args:
+        idx = args.index("--key") + 1
+        if idx < len(args):
+            settings.api_key = args[idx]
+            settings.use_vertex = False
 
     if "--no-stream" in args:
         settings.streaming = False

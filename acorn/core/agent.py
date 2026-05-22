@@ -7,7 +7,7 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
-from acorn.config.settings import AcornSettings
+from acorn.config.settings import AcornSettings, check_for_updates
 from acorn.config.project_config import load_project_config, apply_project_config
 from acorn.core.context import ContextManager
 from acorn.core.costs import CostTracker
@@ -94,11 +94,16 @@ class AcornAgent:
 
         self._file_backups: list[dict] = []
 
-        self.client = genai.Client(
-            vertexai=True,
-            project=self.settings.project,
-            location=self.settings.location,
-        )
+        if self.settings.use_vertex:
+            self.client = genai.Client(
+                vertexai=True,
+                project=self.settings.project,
+                location=self.settings.location,
+            )
+        else:
+            self.client = genai.Client(
+                api_key=self.settings.api_key,
+            )
 
         self._tools = self._build_tools()
         self._tool_map = self._build_tool_map()
@@ -358,9 +363,7 @@ class AcornAgent:
     # --- Streaming ---
 
     def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
-        """Streams a response, collecting text silently with a spinner."""
-        spinner = Spinner()
-        spinner.start()
+        """Streams a response with real-time text output."""
         try:
             response_stream = self.client.models.generate_content_stream(
                 model=model,
@@ -370,24 +373,32 @@ class AcornAgent:
 
             full_text = ""
             all_parts = []
+            started_text = False
 
             for chunk in response_stream:
                 if not chunk.candidates:
                     continue
                 for part in chunk.candidates[0].content.parts:
                     if part.text:
+                        if not started_text:
+                            self.ui.stream_start_live()
+                            started_text = True
                         full_text += part.text
+                        self.ui.stream_chunk_live(part.text)
                     if part.function_call:
                         all_parts.append(part)
+
+            if started_text:
+                self.ui.stream_end_live()
 
             return full_text, all_parts
 
         except KeyboardInterrupt:
+            if started_text:
+                self.ui.stream_end_live()
             raise
         except Exception as e:
             raise e
-        finally:
-            spinner.stop()
 
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
         tool_results = []
@@ -431,11 +442,16 @@ class AcornAgent:
 
         self.context.add("user", display_text)
 
-        model = self.router.route(display_text)
-        if model == self.settings.flash_model:
-            self.ui.info(f"[Flash mode]")
+        # Force Pro model if image is attached (vision requires Pro)
+        if image_parts:
+            model = self.settings.model
+            self.ui.info(f"[Pro mode - vision]")
         else:
-            self.ui.info(f"[Pro mode]")
+            model = self.router.route(display_text)
+            if model == self.settings.flash_model:
+                self.ui.info(f"[Flash mode]")
+            else:
+                self.ui.info(f"[Pro mode]")
 
         # Build message history
         contents = []
@@ -460,8 +476,12 @@ class AcornAgent:
         current_parts.extend(image_parts)
         contents.append(types.Content(role="user", parts=current_parts))
 
+        system_instruction = SYSTEM_PROMPT
+        if self.settings.project_instructions:
+            system_instruction += f"\n\n## Project Instructions (from .acorn.md)\n{self.settings.project_instructions}"
+
         config = types.GenerateContentConfig(
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=system_instruction,
             tools=self._tools,
             temperature=self.settings.temperature,
             max_output_tokens=self.settings.max_output_tokens,
@@ -531,7 +551,7 @@ class AcornAgent:
                 final_text = full_text or "(No response)"
                 self.context.add("model", final_text)
 
-                if self.settings.streaming:
+                if not self.settings.streaming:
                     self.ui.stream_response_formatted(final_text)
 
                 # Show cost after response
@@ -591,16 +611,24 @@ class AcornAgent:
     def run(self):
         self.ui.banner()
 
+        self._update_available = None
+        check_for_updates(callback=lambda v: setattr(self, '_update_available', v))
+
         if self.git.is_repo:
             self.ui.info(f"Project: {self.settings.working_dir}")
             self.ui.info(f"Branch:  {self.git.current_branch()}")
         else:
             self.ui.info(f"Directory: {self.settings.working_dir}")
 
+        auth_mode = "Vertex AI" if self.settings.use_vertex else "API Key"
+        self.ui.info(f"Auth:    {auth_mode}")
         self.ui.info(f"Model:   {self.settings.model} | Flash: {self.settings.flash_model}")
 
         if self._has_project_config:
             self.ui.success("Loaded .acorn.toml config")
+
+        if self.settings.project_instructions:
+            self.ui.success("Loaded .acorn.md project instructions")
 
         if self.settings.persist_sessions and self.session.has_previous_session:
             self.ui.info("Previous session found.")
@@ -615,6 +643,12 @@ class AcornAgent:
                 pass
 
         self.ui.divider()
+
+        if self._update_available:
+            from acorn.config.settings import VERSION
+            self.ui.info(f"Update available: v{self._update_available} (current: v{VERSION})")
+            self.ui.info("Run: pip install --upgrade acorn-agent")
+
         self.ui.info("Type /help for commands, /exit to quit\n")
 
         while True:
@@ -699,6 +733,15 @@ class AcornAgent:
             elif cmd == '/routing on':
                 self.settings.use_smart_routing = True
                 self.ui.success("Smart routing enabled.")
+                continue
+            elif cmd == '/config':
+                from acorn.config.settings import VERSION, ACORN_HOME
+                self.ui.info(f"Version:     {VERSION}")
+                self.ui.info(f"Config dir:  {ACORN_HOME}")
+                self.ui.info(f"Auth mode:   {'Vertex AI' if self.settings.use_vertex else 'API Key'}")
+                self.ui.info(f"Working dir: {self.settings.working_dir}")
+                if self.settings.project_instructions:
+                    self.ui.info(f"Project instructions: .acorn.md loaded")
                 continue
 
             try:

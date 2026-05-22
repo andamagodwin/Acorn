@@ -2,7 +2,9 @@
 
 **An autonomous coding agent that lives in your terminal.**
 
-Acorn reads your code, writes files, runs commands, and refactors across your entire codebase — powered by Google's Gemini 3.1 Pro via Vertex AI.
+Acorn reads your code, writes files, runs commands, and refactors across your entire codebase — powered by Google's Gemini.
+
+**Website:** [acorncli.dev](https://acorncli.dev)
 
 ```
      █████╗  ██████╗ ██████╗ ██████╗ ███╗   ██╗
@@ -15,7 +17,7 @@ Acorn reads your code, writes files, runs commands, and refactors across your en
 
 ## Features
 
-- **Streaming responses** — see output as it's generated
+- **Real-time streaming** — tokens appear as they're generated, not after
 - **Smart model routing** — Flash for simple questions, Pro for complex tasks
 - **Surgical file editing** — modifies specific lines, not entire files
 - **Multi-file refactoring** — reads and edits across your whole codebase
@@ -25,25 +27,33 @@ Acorn reads your code, writes files, runs commands, and refactors across your en
 - **Undo support** — revert the last file change instantly
 - **Cost tracking** — see what you're spending per session
 - **Project config** — per-repo `.acorn.toml` for custom settings
+- **Project instructions** — per-repo `.acorn.md` for custom context
 - **Permission system** — 3-tier safety (safe/ask/deny)
 - **Git-aware** — understands your branch, status, and project structure
+- **Dual auth** — works with simple API key or Vertex AI (enterprise)
+- **Update notifications** — know when a new version is available
 
 ---
 
 ## Quick Start
 
 ```bash
-# Install from PyPI (easiest)
+# Install from PyPI
 pip install acorn-agent
-
-# Or install from GitHub
-pip install git+https://github.com/andamagodwin/acorn.git
 
 # Run it
 acorn
 ```
 
-On first run it will ask for your GCP project ID. That's it.
+On first run it will ask you to choose authentication:
+1. **Gemini API key** — get one free at [aistudio.google.com](https://aistudio.google.com/apikey) (easiest)
+2. **Vertex AI** — use your GCP project (enterprise)
+
+Or set it via environment variable:
+```bash
+export GEMINI_API_KEY="your-key-here"
+acorn
+```
 
 ---
 
@@ -54,60 +64,44 @@ On first run it will ask for your GCP project ID. That's it.
 | Requirement | Why |
 |-------------|-----|
 | Python 3.11+ | Runtime |
-| Google Cloud account | Vertex AI access |
-| `gcloud` CLI | Authentication |
+| Gemini API key **or** GCP project | Model access |
 
-### Step 1: Clone and Install
+### Step 1: Install
 
+```bash
+pip install acorn-agent
+```
+
+Or from source:
 ```bash
 git clone https://github.com/andamagodwin/acorn.git
 cd acorn
 pip install -e .
 ```
 
-This installs `acorn` as a global command you can run from anywhere.
+### Step 2: Authentication
 
-### Step 2: Set Up Google Cloud
+**Option A: API Key (easiest)**
 
-You need a GCP project with Vertex AI API enabled and authentication configured.
-
+Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey), then:
 ```bash
-# Install gcloud CLI if you don't have it
-# https://cloud.google.com/sdk/docs/install
+export GEMINI_API_KEY="your-key-here"
+acorn
+```
 
-# Login to Google Cloud
-gcloud auth login
+Or just run `acorn` and it will prompt you on first launch.
+
+**Option B: Vertex AI (enterprise)**
+
+For organizations using GCP:
+```bash
 gcloud auth application-default login
-
-# Set your project
-gcloud config set project YOUR_PROJECT_ID
-```
-
-### Step 3: Enable Vertex AI API
-
-```bash
 gcloud services enable aiplatform.googleapis.com
+export ACORN_PROJECT="your-gcp-project-id"
+acorn
 ```
 
-Or enable it in the console: https://console.cloud.google.com/apis/library/aiplatform.googleapis.com
-
-### Step 4: Configure Your Project ID
-
-Edit `acorn/config/settings.py` and set your project:
-
-```python
-project: str = "your-gcp-project-id"
-```
-
-Or use the CLI flag:
-
-```bash
-acorn --project your-gcp-project-id
-```
-
-Or use a `.acorn.toml` in your repo (see below).
-
-### Step 5: Run
+### Step 3: Run
 
 ```bash
 cd ~/your-project
@@ -125,6 +119,9 @@ acorn
 # Use a specific model
 acorn --model gemini-2.5-flash
 
+# Use an API key directly
+acorn --key YOUR_API_KEY
+
 # List available models
 acorn --models
 
@@ -137,7 +134,7 @@ acorn --no-routing
 # Auto-approve all file writes (careful!)
 acorn --unsafe
 
-# Override GCP project
+# Override GCP project (Vertex AI mode)
 acorn --project my-project-id
 
 # Help
@@ -170,6 +167,7 @@ Gemini will analyze the image and respond accordingly.
 | `/clear` | Reset context and session |
 | `/sessions` | List saved sessions |
 | `/routing on\|off` | Toggle smart routing |
+| `/config` | Show current configuration |
 | `/exit` | Quit |
 
 ---
@@ -201,6 +199,29 @@ safe_commands = [
 ```
 
 Acorn auto-detects this file by walking up from your working directory.
+
+### Project Instructions (`.acorn.md`)
+
+Drop a `.acorn.md` in your project root to give Acorn persistent context about your project:
+
+```markdown
+# Project: MyApp
+
+## Tech Stack
+- Python 3.12, FastAPI, SQLAlchemy
+- Frontend: React + TypeScript
+
+## Conventions
+- Use snake_case for Python, camelCase for TypeScript
+- Always add type hints
+- Tests go in tests/ with pytest
+
+## Important
+- Never modify migrations directly — use alembic
+- The auth module is being rewritten, don't touch auth/legacy/
+```
+
+This gets injected into the system prompt, so Acorn always knows your project's conventions.
 
 ---
 
@@ -269,7 +290,7 @@ acorn/
 3. The model calls tools — reads files, edits code, runs commands
 4. Tool results feed back for up to 25 iterations per turn
 5. If something fails, it sees the error and adapts
-6. Final response renders with markdown formatting
+6. Response streams to your terminal in real-time
 
 ---
 

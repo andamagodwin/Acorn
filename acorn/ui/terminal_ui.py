@@ -248,6 +248,7 @@ class TerminalUI:
         self.md = MarkdownRenderer()
 
     def banner(self):
+        from acorn.config.settings import VERSION
         width = min(56, _term_width() - 4)
         C1 = Colors.AMBER
         C2 = Colors.WARM
@@ -266,8 +267,8 @@ class TerminalUI:
         print(f"  {C4}  ██║  ██║╚██████╗╚██████╔╝██║  ██║██║ ╚████║{R}")
         print(f"  {C4}  ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝{R}")
         print()
-        print(f"  {DIM}  Autonomous Coding Agent v2.0{R}")
-        print(f"  {DIM}  Powered by Vertex AI | Streaming | Smart Routing{R}")
+        print(f"  {DIM}  Autonomous Coding Agent v{VERSION}{R}")
+        print(f"  {DIM}  Powered by Gemini | Live Streaming | Smart Routing{R}")
         print()
         print(f"  {C1}{'=' * width}{R}")
         print()
@@ -284,20 +285,31 @@ class TerminalUI:
         print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
         print(rendered)
 
-    def stream_start(self):
-        """Called when streaming begins — we'll collect text silently."""
-        pass
+    def stream_start_live(self):
+        """Called when live streaming begins — print the Acorn header."""
+        print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
+        sys.stdout.write(f"  ")
+        sys.stdout.flush()
+        self._stream_buffer = ""
+        self._stream_line_started = True
 
-    def stream_chunk(self, text: str):
-        """Silently collect — we render the final formatted version only."""
-        pass
+    def stream_chunk_live(self, text: str):
+        """Streams text to terminal in real-time with basic formatting."""
+        for char in text:
+            if char == '\n':
+                sys.stdout.write(f"\n  ")
+                sys.stdout.flush()
+            else:
+                sys.stdout.write(char)
+                sys.stdout.flush()
 
-    def stream_end(self):
-        """Streaming done — nothing to do here, formatting happens in stream_response_formatted."""
-        pass
+    def stream_end_live(self):
+        """Finalizes live streaming output."""
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
     def stream_response_formatted(self, full_text: str):
-        """Render the complete response with markdown formatting — this is the only output."""
+        """Render the complete response with markdown formatting (used for non-streaming mode)."""
         rendered = self.md.render(full_text)
         print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
         print(rendered)
@@ -400,6 +412,7 @@ class TerminalUI:
   {C}/clear{R}        Clear context and session
   {C}/sessions{R}     List saved sessions
   {C}/routing on|off{R}  Toggle smart routing
+  {C}/config{R}       Show configuration details
   {C}/exit{R}         Quit
 
   {C}Tips{R}
@@ -407,6 +420,8 @@ class TerminalUI:
   Attach images: just include the path in your message
   e.g. "what's in screenshot.png"
   Project config: drop a .acorn.toml in your repo root
+  Project instructions: drop a .acorn.md for custom context
+  Docs: https://acorncli.dev
 """)
 
     def show_status(self, stats: dict):

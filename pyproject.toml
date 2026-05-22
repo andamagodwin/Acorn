@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acorn-agent"
-version = "2.1.0"
-description = "An autonomous coding agent that lives in your terminal — powered by Gemini 3.1 Pro"
+version = "2.2.0"
+description = "An autonomous coding agent that lives in your terminal — powered by Gemini"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -29,7 +29,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/andamagodwin/acorn"
+Homepage = "https://acorncli.dev"
+Documentation = "https://acorncli.dev"
 Repository = "https://github.com/andamagodwin/acorn"
 Issues = "https://github.com/andamagodwin/acorn/issues"
 
