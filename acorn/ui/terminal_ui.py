@@ -31,6 +31,15 @@ class Colors:
 
     BG_CODE = "\033[48;5;236m"
 
+    # Diff rendering — tinted backgrounds so changed lines read as blocks
+    # rather than as punctuation you have to hunt for.
+    DIFF_ADD = "\033[38;5;114m"
+    DIFF_DEL = "\033[38;5;174m"
+    DIFF_ADD_BG = "\033[48;5;22m\033[38;5;157m"
+    DIFF_DEL_BG = "\033[48;5;52m\033[38;5;217m"
+    DIFF_HUNK = "\033[38;5;110m"
+    DIFF_GUTTER = "\033[38;5;240m"
+
 
 TOOL_VERBS = {
     "read_file": [
@@ -76,6 +85,15 @@ TOOL_VERBS = {
         "Reading the whole bookshelf", "Gathering intel from",
         "Assembling the puzzle pieces", "Speed-reading",
     ],
+    "web_search": [
+        "Googling", "Scouring the web for", "Asking the internet about",
+        "Casting a net for", "Trawling the web for", "Searching for",
+        "Consulting the hive mind about",
+    ],
+    "fetch_url": [
+        "Fetching", "Reeling in", "Pulling down", "Grabbing",
+        "Downloading", "Reading up on", "Opening",
+    ],
 }
 
 THINKING_MESSAGES = [
@@ -96,6 +114,12 @@ def _term_width() -> int:
 
 
 def _get_tool_verb(tool_name: str) -> str:
+    # MCP tools arrive as mcp__<server>__<tool>; name the server so it's clear
+    # the work is happening outside Acorn.
+    if tool_name.startswith("mcp__"):
+        parts = tool_name.split("__")
+        if len(parts) >= 3:
+            return f"Calling {parts[1]}:{parts[2]}"
     verbs = TOOL_VERBS.get(tool_name, ["Working on", "Processing", "Handling"])
     return random.choice(verbs)
 
@@ -368,6 +392,74 @@ class TerminalUI:
             for line in lines:
                 print(f"    {Colors.DIM}{line}{Colors.RESET}")
 
+    def show_diff(self, filepath: str, diff: str, added: int, removed: int,
+                  max_lines: int = 40):
+        """Renders a unified diff with colors and real line numbers."""
+        name = os.path.basename(filepath) or filepath
+        stat = f"{Colors.DIFF_ADD}+{added}{Colors.RESET} {Colors.DIFF_DEL}-{removed}{Colors.RESET}"
+        print(f"  {Colors.BOLD}{Colors.AMBER}{name}{Colors.RESET}  {stat}")
+
+        if not diff.strip():
+            return
+
+        width = min(72, _term_width() - 6)
+        print(f"  {Colors.DIM}{'─' * width}{Colors.RESET}")
+
+        old_no = new_no = 0
+        shown = 0
+        skipped = 0
+
+        for line in diff.splitlines():
+            # File headers restate what we already printed above.
+            if line.startswith(("--- ", "+++ ")):
+                continue
+
+            if line.startswith("@@"):
+                match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)", line)
+                if match:
+                    old_no = int(match.group(1))
+                    new_no = int(match.group(2))
+                    tail = match.group(3).strip()
+                    label = f" {tail}" if tail else ""
+                    if shown:
+                        print(f"  {Colors.DIM}{'┈' * width}{Colors.RESET}")
+                    print(f"  {Colors.DIFF_HUNK}@@{label}{Colors.RESET}")
+                continue
+
+            if shown >= max_lines:
+                skipped += 1
+                continue
+
+            body = line[1:] if line else ""
+            body = body.rstrip("\n")
+
+            if line.startswith("+"):
+                gutter = f"{new_no:>4}"
+                print(f"  {Colors.DIFF_GUTTER}{gutter}{Colors.RESET} {Colors.DIFF_ADD_BG}+ {body}{Colors.RESET}")
+                new_no += 1
+            elif line.startswith("-"):
+                gutter = f"{old_no:>4}"
+                print(f"  {Colors.DIFF_GUTTER}{gutter}{Colors.RESET} {Colors.DIFF_DEL_BG}- {body}{Colors.RESET}")
+                old_no += 1
+            else:
+                gutter = f"{new_no:>4}"
+                print(f"  {Colors.DIFF_GUTTER}{gutter}{Colors.RESET} {Colors.DIM}  {body}{Colors.RESET}")
+                old_no += 1
+                new_no += 1
+            shown += 1
+
+        if skipped:
+            print(f"  {Colors.DIM}... {skipped} more diff lines{Colors.RESET}")
+        print(f"  {Colors.DIM}{'─' * width}{Colors.RESET}")
+
+    def file_created(self, filepath: str, line_count: int):
+        """Shown when a brand new file is written — there's no diff to display."""
+        name = os.path.basename(filepath) or filepath
+        print(
+            f"  {Colors.BOLD}{Colors.AMBER}{name}{Colors.RESET}  "
+            f"{Colors.DIFF_ADD}+{line_count} lines{Colors.RESET} {Colors.DIM}(new file){Colors.RESET}"
+        )
+
     def permission_prompt(self, action: str, details: str) -> bool:
         print(f"\n  {Colors.YELLOW}Permission needed: {action}{Colors.RESET}")
         if len(details) > 120:
@@ -411,14 +503,24 @@ class TerminalUI:
   {C}/undo{R}         Revert last file change
   {C}/clear{R}        Clear context and session
   {C}/sessions{R}     List saved sessions
-  {C}/routing on|off{R}  Toggle smart routing
   {C}/config{R}       Show configuration details
   {C}/exit{R}         Quit
+
+  {C}Tools{R}
+  {D}{'─' * 40}{R}
+  {C}/routing{R}         Explain the last routing decision
+  {C}/routing on|off{R}  Toggle smart routing
+  {C}/shell{R}           Show shell mode and working directory
+  {C}/shell reset{R}     Clear shell state (cd, exports, venv)
+  {C}/mcp{R}             List MCP servers and their tools
+  {C}/web on|off{R}      Toggle web search and page fetching
 
   {C}Tips{R}
   {D}{'─' * 40}{R}
   Attach images: just include the path in your message
   e.g. "what's in screenshot.png"
+  Commands share one shell — cd and venv activation persist
+  MCP servers: configure in ~/.acorn/mcp.json
   Project config: drop a .acorn.toml in your repo root
   Project instructions: drop a .acorn.md for custom context
   Docs: https://acorncli.dev
@@ -435,7 +537,10 @@ class TerminalUI:
   Compactions: {stats['compactions']}
   Pro model:   {stats['pro_model']}
   Flash model: {stats['flash_model']}
-  Routing:     Pro={stats['routing']['pro_calls']} Flash={stats['routing']['flash_calls']}
+  Routing:     Pro={stats['routing']['pro_calls']} Flash={stats['routing']['flash_calls']} \
+(tie-breaks: {stats['routing'].get('classifier_calls', 0)})
+  Shell:       {stats.get('shell_mode', 'one-shot')} — {stats.get('shell_cwd', '')}
+  MCP:         {stats.get('mcp_servers', 0)} servers, {stats.get('mcp_tools', 0)} tools
   Undo stack:  {stats['backups']} backups
   Session cost: {stats.get('cost', '$0.00')}
 """)
@@ -455,6 +560,63 @@ class TerminalUI:
                 marker = f" {G}(active: flash){R}"
             print(f"  {Colors.CYAN}{model_id:<32}{R}{D}{desc}{R}{marker}")
         print(f"\n  {D}Use: /model <name> to switch{R}\n")
+
+    def show_routing(self, enabled: bool, decision):
+        """Explains the most recent routing decision."""
+        C, R, D = Colors.AMBER, Colors.RESET, Colors.DIM
+        state = f"{Colors.GREEN}on{R}" if enabled else f"{Colors.YELLOW}off{R}"
+        print(f"\n  {C}Smart Routing{R}  {state}")
+        print(f"  {D}{'─' * 46}{R}")
+        if decision is None:
+            print(f"  {D}No requests routed yet.{R}\n")
+            return
+        print(f"  Last request -> {Colors.CYAN}{decision.model}{R}")
+        print(f"  Score:  {decision.score:+.1f}   {D}(via {decision.source}){R}")
+        if decision.reasons:
+            print(f"  {D}Signals:{R}")
+            for reason in decision.reasons:
+                print(f"    {D}{reason}{R}")
+        print()
+
+    def show_shell(self, persistent: bool, cwd: str):
+        C, R, D = Colors.AMBER, Colors.RESET, Colors.DIM
+        mode = f"{Colors.GREEN}persistent{R}" if persistent else f"{Colors.YELLOW}one-shot{R}"
+        print(f"\n  {C}Shell{R}  {mode}")
+        print(f"  {D}{'─' * 46}{R}")
+        print(f"  Working dir: {cwd}")
+        if persistent:
+            print(f"  {D}cd, exports, and venv activation persist between commands.{R}")
+            print(f"  {D}Use /shell reset to clear that state.{R}")
+        print()
+
+    def show_mcp(self, rows: list, tools: list):
+        """Lists MCP servers and the tools they expose."""
+        C, R, D = Colors.AMBER, Colors.RESET, Colors.DIM
+        print(f"\n  {C}MCP Servers{R}")
+        print(f"  {D}{'─' * 46}{R}")
+
+        if not rows:
+            print(f"  {D}No MCP servers configured.{R}")
+            print(f"  {D}Add them in ~/.acorn/mcp.json or .mcp.json:{R}")
+            print(f'  {D}  {{"mcpServers": {{"name": {{"command": "npx", "args": [...]}}}}}}{R}\n')
+            return
+
+        for row in rows:
+            if row["running"]:
+                badge = f"{Colors.GREEN}running{R}"
+                detail = f"{row['tools']} tools"
+            else:
+                badge = f"{Colors.RED}failed{R}"
+                detail = row.get("error") or "not running"
+            print(f"  {Colors.CYAN}{row['name']:<18}{R} {badge}  {D}{detail}{R}")
+
+        if tools:
+            print(f"\n  {C}Available tools{R}")
+            print(f"  {D}{'─' * 46}{R}")
+            for tool in tools:
+                description = (tool["description"] or "").split("\n")[0][:52]
+                print(f"  {D}{tool['qualified_name']:<34}{R} {D}{description}{R}")
+        print()
 
     def cost_inline(self, cost_str: str):
         """Shows cost after each response, subtle."""

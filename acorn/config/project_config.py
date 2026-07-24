@@ -58,6 +58,23 @@ def apply_project_config(settings, config: dict):
             settings.use_smart_routing = routing_cfg["enabled"]
         if "threshold" in routing_cfg:
             settings.routing_threshold = routing_cfg["threshold"]
+        if "classifier" in routing_cfg:
+            settings.routing_classifier = routing_cfg["classifier"]
+
+    if "shell" in config:
+        shell_cfg = config["shell"]
+        if "persistent" in shell_cfg:
+            settings.persistent_shell = shell_cfg["persistent"]
+
+    if "web" in config:
+        web_cfg = config["web"]
+        if "enabled" in web_cfg:
+            settings.web_enabled = web_cfg["enabled"]
+
+    if "mcp" in config:
+        mcp_cfg = config["mcp"]
+        if "enabled" in mcp_cfg:
+            settings.mcp_enabled = mcp_cfg["enabled"]
 
     if "permissions" in config:
         perm_cfg = config["permissions"]

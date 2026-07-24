@@ -39,6 +39,9 @@ def main():
   --no-stream        Disable streaming (wait for full response)
   --no-routing       Disable smart routing (always use Pro)
   --no-session       Disable session persistence
+  --no-shell         Run each command in its own process (no shared state)
+  --no-web           Disable web search and page fetching
+  --no-mcp           Don't start configured MCP servers
   --unsafe           Auto-approve all actions (dangerous!)
   --project <id>     Override GCP project ID
   --key <key>        Use Gemini API key (alternative to Vertex AI)
@@ -53,6 +56,7 @@ def main():
 \033[1mProject Config:\033[0m
   .acorn.toml        Per-repo model/routing/permission config
   .acorn.md          Per-repo instructions injected into system prompt
+  .mcp.json          Per-repo MCP servers (or ~/.acorn/mcp.json)
         """)
         return
 
@@ -138,6 +142,15 @@ def main():
 
     if "--no-session" in args:
         settings.persist_sessions = False
+
+    if "--no-shell" in args:
+        settings.persistent_shell = False
+
+    if "--no-web" in args:
+        settings.web_enabled = False
+
+    if "--no-mcp" in args:
+        settings.mcp_enabled = False
 
     if "--unsafe" in args:
         settings.permission_rules = {k: "safe" for k in settings.permission_rules}

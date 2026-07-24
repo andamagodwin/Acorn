@@ -18,7 +18,11 @@ Acorn reads your code, writes files, runs commands, and refactors across your en
 ## Features
 
 - **Real-time streaming** — tokens appear as they're generated, not after
-- **Smart model routing** — Flash for simple questions, Pro for complex tasks
+- **Smart model routing** — scores each request on size, scope, and intent to pick Flash or Pro
+- **Persistent shell** — `cd`, `export`, and `venv` activation carry across commands
+- **Web search built in** — searches and reads pages with no API key required
+- **MCP support** — plug in any Model Context Protocol server for extra tools
+- **Colored diffs** — every file change shown as a real diff with line numbers
 - **Surgical file editing** — modifies specific lines, not entire files
 - **Multi-file refactoring** — reads and edits across your whole codebase
 - **Image/screenshot analysis** — attach images for the model to analyze
@@ -166,9 +170,90 @@ Gemini will analyze the image and respond accordingly.
 | `/undo` | Revert the last file change |
 | `/clear` | Reset context and session |
 | `/sessions` | List saved sessions |
-| `/routing on\|off` | Toggle smart routing |
 | `/config` | Show current configuration |
 | `/exit` | Quit |
+
+### Tool commands
+
+| Command | What it does |
+|---------|--------------|
+| `/routing` | Explain why the last request went to Flash or Pro |
+| `/routing on\|off` | Toggle smart routing |
+| `/shell` | Show shell mode and current working directory |
+| `/shell reset` | Clear shell state (`cd`, exports, venv) |
+| `/mcp` | List MCP servers and the tools they expose |
+| `/web on\|off` | Toggle web search and page fetching |
+
+---
+
+## Persistent Shell
+
+Commands run in one long-lived shell session, so state carries between calls:
+
+```
+> set up the project
+
+~ Running python -m venv .venv
+~ Running source .venv/bin/activate     <- still active below
+~ Running pip install -r requirements.txt
+~ Running pytest                        <- runs inside the venv
+```
+
+Without this, every command starts from scratch and the agent has to chain
+everything with `&&`. Run with `--no-shell` to go back to one process per
+command.
+
+A timed-out command is interrupted on its own — the session and its state
+survive. Interactive programs (`vim`, `less`, `top`, a bare `python`) are
+refused up front, since they would hang the session waiting for input.
+
+---
+
+## Web Search
+
+Acorn can search the web and read pages without any API key or signup:
+
+```
+> what changed in the latest fastapi release?
+
+~ Searching for 'fastapi latest release changelog'
+~ Fetching fastapi.tiangolo.com/release-notes/
+```
+
+Two tools are available to the model: `web_search` for finding pages and
+`fetch_url` for reading one. Disable both with `--no-web` or `/web off`.
+
+---
+
+## MCP Servers
+
+Acorn speaks the [Model Context Protocol](https://modelcontextprotocol.io), so
+you can plug in any MCP server and its tools become available to the agent.
+
+Configure servers in `~/.acorn/mcp.json` (global) or `.mcp.json` (per project):
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_TOKEN": "ghp_..." }
+    }
+  }
+}
+```
+
+This is the same config format other MCP clients use, so existing files work
+as-is. Tools appear to the model as `mcp__<server>__<tool>`, and since they run
+third-party code they prompt for permission before each call.
+
+Run `/mcp` to see what's connected. A server that fails to start is reported
+there and never blocks startup. Use `--no-mcp` to skip them entirely.
 
 ---
 
@@ -186,6 +271,18 @@ max_output_tokens = 65536
 [routing]
 enabled = true
 threshold = 200
+# Let Flash break ties when the heuristics are unsure (one cheap extra call)
+classifier = true
+
+[shell]
+# Share cwd, exports, and venv activation across commands
+persistent = true
+
+[web]
+enabled = true
+
+[mcp]
+enabled = true
 
 [project]
 gcp_project = "your-project-id"
@@ -270,11 +367,14 @@ acorn/
 │   ├── context.py         — Context window with auto-compaction
 │   ├── costs.py           — Token usage and cost tracking
 │   ├── planner.py         — Multi-step task planning
-│   ├── router.py          — Smart model routing (Flash vs Pro)
+│   ├── router.py          — Signal-scored model routing (Flash vs Pro)
 │   └── session.py         — Session persistence to ~/.acorn/sessions/
 ├── tools/
-│   ├── filesystem.py      — Read, write, edit, search, list
+│   ├── filesystem.py      — Read, write, edit, search, list, diffs
 │   ├── terminal.py        — Command execution with timeout
+│   ├── shell.py           — Persistent shell session
+│   ├── web.py             — Web search and page fetching
+│   ├── mcp.py             — Model Context Protocol client
 │   └── git_tools.py       — Git-aware project understanding
 ├── ui/
 │   └── terminal_ui.py     — Terminal UI with markdown rendering
@@ -286,11 +386,25 @@ acorn/
 ## How It Works
 
 1. You type a message
-2. Acorn routes it to Flash (simple) or Pro (complex)
-3. The model calls tools — reads files, edits code, runs commands
+2. Acorn scores it on size, scope, and intent, then routes to Flash or Pro
+3. The model calls tools — reads files, edits code, runs commands, searches the web
 4. Tool results feed back for up to 25 iterations per turn
 5. If something fails, it sees the error and adapts
 6. Response streams to your terminal in real-time
+
+### Routing
+
+Rather than matching keywords, each request is scored on independent signals:
+length, pasted code or stack traces, how many files it names, whether it asks
+for a change or an explanation, and whether something is described as broken.
+`/routing` shows the score and every signal behind the last decision.
+
+Keyword matching gets this wrong in both directions — *"what is wrong with my
+entire auth system?"* opens like a definition question but is real debugging
+work, while *"refactor auth"* is only 14 characters. Scoring separates them.
+
+Requests that land in the ambiguous middle are settled by one cheap Flash call.
+That's a round trip, so it only happens when the signals genuinely conflict.
 
 ---
 

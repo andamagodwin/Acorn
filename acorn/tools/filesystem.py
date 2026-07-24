@@ -1,7 +1,51 @@
 """File system tools — read, write, edit, search, navigate."""
 import os
 import difflib
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass
+class FileChange:
+    """Outcome of a write or edit.
+
+    Carries two views of the same result: `message` is what the model is told
+    (short, so a big diff doesn't eat the context window) and `diff` is the full
+    unified diff kept back for rendering to the user.
+    """
+
+    ok: bool
+    message: str
+    filepath: str = ""
+    diff: str = ""
+    added: int = 0
+    removed: int = 0
+    created: bool = False
+
+    def __str__(self) -> str:
+        return self.message
+
+    @property
+    def stat_line(self) -> str:
+        if self.created:
+            return f"+{self.added} lines (new file)"
+        return f"+{self.added} -{self.removed}"
+
+
+def compute_diff(old: str, new: str, filepath: str, context: int = 3) -> tuple[str, int, int]:
+    """Builds a unified diff and counts changed lines."""
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+    diff_lines = list(difflib.unified_diff(
+        old_lines,
+        new_lines,
+        fromfile=f"a/{filepath}",
+        tofile=f"b/{filepath}",
+        n=context,
+    ))
+    added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+    removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
+    return "".join(diff_lines), added, removed
 
 
 def read_file(filepath: str, offset: int = 0, limit: int = 0) -> str:
@@ -31,50 +75,99 @@ def read_file(filepath: str, offset: int = 0, limit: int = 0) -> str:
         return f"Error reading file: {e}"
 
 
-def write_file(filepath: str, content: str) -> str:
+def write_file(filepath: str, content: str) -> FileChange:
     """Creates or overwrites a file with the given content."""
     try:
         path = Path(filepath).resolve()
+        existed = path.exists()
+
+        previous = ""
+        if existed:
+            try:
+                previous = path.read_text(encoding='utf-8')
+            except (OSError, UnicodeDecodeError):
+                previous = ""
+
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
-        lines = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
-        return f"Success: Wrote {lines} lines to {path}"
+
+        line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+
+        if existed:
+            diff, added, removed = compute_diff(previous, content, path.name)
+            return FileChange(
+                ok=True,
+                message=f"Success: Rewrote {path} (+{added} -{removed})",
+                filepath=str(path),
+                diff=diff,
+                added=added,
+                removed=removed,
+            )
+
+        return FileChange(
+            ok=True,
+            message=f"Success: Created {path} ({line_count} lines)",
+            filepath=str(path),
+            diff="",
+            added=line_count,
+            created=True,
+        )
     except Exception as e:
-        return f"Error writing file: {e}"
+        return FileChange(ok=False, message=f"Error writing file: {e}", filepath=filepath)
 
 
-def edit_file(filepath: str, old_string: str, new_string: str) -> str:
+def edit_file(filepath: str, old_string: str, new_string: str) -> FileChange:
     """Performs a surgical edit — replaces old_string with new_string in the file.
     old_string must be an exact, unique match in the file."""
     try:
         path = Path(filepath).resolve()
         if not path.exists():
-            return f"Error: File not found: {filepath}"
+            return FileChange(
+                ok=False,
+                message=f"Error: File not found: {filepath}",
+                filepath=filepath,
+            )
 
         with open(path, 'r', encoding='utf-8') as f:
             content = f.read()
 
         count = content.count(old_string)
         if count == 0:
-            return f"Error: old_string not found in {filepath}. Read the file first to get exact content."
+            return FileChange(
+                ok=False,
+                message=(
+                    f"Error: old_string not found in {filepath}. "
+                    f"Read the file first to get exact content."
+                ),
+                filepath=filepath,
+            )
         if count > 1:
-            return f"Error: old_string matches {count} locations. Provide more context to make it unique."
+            return FileChange(
+                ok=False,
+                message=(
+                    f"Error: old_string matches {count} locations. "
+                    f"Provide more context to make it unique."
+                ),
+                filepath=filepath,
+            )
 
         new_content = content.replace(old_string, new_string, 1)
 
         with open(path, 'w', encoding='utf-8') as f:
             f.write(new_content)
 
-        # Show a unified diff of what changed
-        old_lines = content.splitlines(keepends=True)
-        new_lines = new_content.splitlines(keepends=True)
-        diff = difflib.unified_diff(old_lines, new_lines, fromfile=filepath, tofile=filepath, lineterm='')
-        diff_text = "".join(list(diff)[:50])
-
-        return f"Success: Applied edit to {path}\n{diff_text}"
+        diff, added, removed = compute_diff(content, new_content, path.name)
+        return FileChange(
+            ok=True,
+            message=f"Success: Applied edit to {path} (+{added} -{removed})",
+            filepath=str(path),
+            diff=diff,
+            added=added,
+            removed=removed,
+        )
     except Exception as e:
-        return f"Error editing file: {e}"
+        return FileChange(ok=False, message=f"Error editing file: {e}", filepath=filepath)
 
 
 def list_directory(path: str = ".", pattern: str = "") -> str:

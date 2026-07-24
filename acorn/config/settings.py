@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 ACORN_HOME = Path.home() / ".acorn"
 SESSIONS_DIR = ACORN_HOME / "sessions"
@@ -89,6 +89,18 @@ class AcornSettings:
     # Smart routing
     use_smart_routing: bool = True
     routing_threshold: int = 200
+    # Let Flash break ties when the heuristics land in the ambiguous band.
+    # Costs one extra cheap call on those turns only.
+    routing_classifier: bool = True
+
+    # Persistent shell — commands share cwd, exports, and venv activation
+    persistent_shell: bool = True
+
+    # Web access
+    web_enabled: bool = True
+
+    # Model Context Protocol servers (configured in ~/.acorn/mcp.json)
+    mcp_enabled: bool = True
 
     # Agent behavior
     max_context_tokens: int = 900_000
@@ -113,6 +125,10 @@ class AcornSettings:
         "edit_file": "ask",
         "execute_command": "ask",
         "delete_file": "deny",
+        "web_search": "safe",
+        "fetch_url": "safe",
+        # MCP tools are third-party code, so they prompt unless told otherwise.
+        "mcp_tool": "ask",
     })
 
     # Commands that are always safe to auto-run

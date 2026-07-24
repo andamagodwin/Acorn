@@ -17,6 +17,8 @@ from acorn.core.router import ModelRouter
 from acorn.tools.filesystem import read_file, write_file, edit_file, list_directory, search_files
 from acorn.tools.terminal import CommandRunner
 from acorn.tools.git_tools import GitTools
+from acorn.tools.web import web_search, fetch_url
+from acorn.tools.mcp import MCPManager, json_schema_to_gemini, parse_qualified_name
 from acorn.ui.terminal_ui import TerminalUI, Spinner
 
 
@@ -30,6 +32,21 @@ SYSTEM_PROMPT = """You are Acorn, an elite autonomous coding agent operating on 
 - Plan and execute multi-step tasks
 - Refactor across multiple files in a single session
 - Analyze images and screenshots provided by the user
+- Search the web and read pages for current information
+
+## Shell Behavior
+Commands run in ONE persistent shell session, so state carries between calls:
+- `cd` persists — don't re-`cd` on every command
+- `export VAR=x`, `source venv/bin/activate`, and `nvm use` all stay in effect
+- Prefer separate calls over chaining with `&&`; earlier setup still applies
+- Never run interactive programs (vim, less, top, a bare `python`) — they hang
+  the session. Use non-interactive flags instead.
+
+## Using the Web
+- Use web_search for current information: library versions, recent releases,
+  error messages you don't recognize, API changes since your training data
+- Use fetch_url to read a specific page, including search results worth opening
+- Prefer official documentation over blog posts when both are available
 
 ## Operating Principles
 1. ALWAYS read a file before editing it — never guess at contents
@@ -84,13 +101,12 @@ class AcornAgent:
         )
         self.costs = CostTracker()
         self.planner = Planner()
-        self.runner = CommandRunner(self.settings.working_dir)
+        self.runner = CommandRunner(
+            self.settings.working_dir,
+            persistent=self.settings.persistent_shell,
+        )
         self.git = GitTools(self.settings.working_dir)
         self.session = SessionManager(self.settings.working_dir)
-        self.router = ModelRouter(
-            pro_model=self.settings.model,
-            flash_model=self.settings.flash_model,
-        )
 
         self._file_backups: list[dict] = []
 
@@ -105,13 +121,97 @@ class AcornAgent:
                 api_key=self.settings.api_key,
             )
 
+        # The router needs a live client to break ties, so it's built after it.
+        self.router = ModelRouter(
+            pro_model=self.settings.model,
+            flash_model=self.settings.flash_model,
+            enabled=self.settings.use_smart_routing,
+            classifier=self._classify_complexity if self.settings.routing_classifier else None,
+        )
+
+        self.mcp = MCPManager(self.settings.working_dir)
+        self._mcp_started = 0
+        self._mcp_failed = 0
+        if self.settings.mcp_enabled:
+            self._mcp_started, self._mcp_failed = self.mcp.start_all()
+
         self._tools = self._build_tools()
         self._tool_map = self._build_tool_map()
 
+    def _classify_complexity(self, prompt: str) -> str:
+        """Asks Flash whether a request is SIMPLE or COMPLEX. Used to break
+        routing ties only, so it's capped tight on output tokens."""
+        response = self.client.models.generate_content(
+            model=self.settings.flash_model,
+            contents=[types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=prompt)],
+            )],
+            config=types.GenerateContentConfig(
+                max_output_tokens=8,
+                temperature=0.0,
+            ),
+        )
+        return response.text or ""
+
     def _build_tools(self) -> list:
         """Declares all tools available to the model."""
+        declarations = self._builtin_declarations()
+        if self.settings.web_enabled:
+            declarations.extend(self._web_declarations())
+        declarations.extend(self._mcp_declarations())
+        return [types.Tool(function_declarations=declarations)]
+
+    def _web_declarations(self) -> list:
         return [
-            types.Tool(function_declarations=[
+            types.FunctionDeclaration(
+                name="web_search",
+                description=(
+                    "Searches the web. Use for current information, library versions, "
+                    "unfamiliar errors, or anything newer than your training data."
+                ),
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "query": types.Schema(type="STRING", description="Search query"),
+                        "max_results": types.Schema(type="INTEGER", description="Results to return (default 6, max 15)"),
+                    },
+                    required=["query"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="fetch_url",
+                description="Fetches a web page and returns its readable text content.",
+                parameters=types.Schema(
+                    type="OBJECT",
+                    properties={
+                        "url": types.Schema(type="STRING", description="The http(s) URL to fetch"),
+                        "max_chars": types.Schema(type="INTEGER", description="Max characters to return (default 15000)"),
+                    },
+                    required=["url"],
+                ),
+            ),
+        ]
+
+    def _mcp_declarations(self) -> list:
+        """Exposes every running MCP server's tools to the model."""
+        declarations = []
+        for tool in self.mcp.all_tools():
+            try:
+                schema = json_schema_to_gemini(tool["schema"], types)
+                description = tool["description"] or f"{tool['name']} (via {tool['server']} MCP server)"
+                declarations.append(types.FunctionDeclaration(
+                    name=tool["qualified_name"],
+                    description=description[:1000],
+                    parameters=schema,
+                ))
+            except Exception as e:
+                # One malformed schema shouldn't cost us every other tool.
+                self.ui.info(f"[Skipped MCP tool {tool['qualified_name']}: {e}]")
+        return declarations
+
+    def _builtin_declarations(self) -> list:
+        return [
                 types.FunctionDeclaration(
                     name="read_file",
                     description="Reads a file's contents. Use offset/limit for large files.",
@@ -177,7 +277,11 @@ class AcornAgent:
                 ),
                 types.FunctionDeclaration(
                     name="execute_command",
-                    description="Runs a terminal command. Safe commands auto-execute; others require user permission.",
+                    description=(
+                        "Runs a terminal command in a persistent shell session. cd, exports, "
+                        "and venv activation persist across calls. Safe commands auto-execute; "
+                        "others require user permission. Never run interactive programs."
+                    ),
                     parameters=types.Schema(
                         type="OBJECT",
                         properties={
@@ -211,7 +315,6 @@ class AcornAgent:
                         required=["filepaths"],
                     ),
                 ),
-            ])
         ]
 
     def _build_tool_map(self) -> dict:
@@ -224,6 +327,8 @@ class AcornAgent:
             "execute_command": self._exec_execute_command,
             "git_status": self._exec_git_status,
             "multi_edit": self._exec_multi_read,
+            "web_search": self._exec_web_search,
+            "fetch_url": self._exec_fetch_url,
         }
 
     def _exec_read_file(self, args: dict) -> str:
@@ -238,14 +343,46 @@ class AcornAgent:
         if not self._check_permission("write_file", filepath):
             return "Permission denied by user."
         self._backup_file(filepath)
-        return write_file(filepath, args["content"])
+        change = write_file(filepath, args["content"])
+        self._render_change(change)
+        return change.message
 
     def _exec_edit_file(self, args: dict) -> str:
         filepath = args["filepath"]
         if not self._check_permission("edit_file", filepath):
             return "Permission denied by user."
         self._backup_file(filepath)
-        return edit_file(filepath, args["old_string"], args["new_string"])
+        change = edit_file(filepath, args["old_string"], args["new_string"])
+        self._render_change(change)
+        return change.message
+
+    def _render_change(self, change) -> None:
+        """Shows the user a colored diff. The model only gets change.message,
+        so a large diff never lands in the context window."""
+        if not change.ok:
+            return
+        if change.created:
+            self.ui.file_created(change.filepath, change.added)
+        elif change.diff:
+            self.ui.show_diff(change.filepath, change.diff, change.added, change.removed)
+
+    def _exec_web_search(self, args: dict) -> str:
+        if not self._check_permission("web_search", args.get("query", "")):
+            return "Permission denied by user."
+        return web_search(args["query"], max_results=args.get("max_results", 6))
+
+    def _exec_fetch_url(self, args: dict) -> str:
+        url = args["url"]
+        if not self._check_permission("fetch_url", url):
+            return "Permission denied by user."
+        return fetch_url(url, max_chars=args.get("max_chars", 15_000))
+
+    def _exec_mcp_tool(self, tool_name: str, args: dict) -> str:
+        parsed = parse_qualified_name(tool_name)
+        label = f"{parsed[0]}.{parsed[1]}" if parsed else tool_name
+        if not self._check_permission("mcp_tool", f"{label} {args}"):
+            return "Permission denied by user."
+        return self.mcp.call(tool_name, args)
 
     def _exec_list_directory(self, args: dict) -> str:
         return list_directory(args.get("path", "."), args.get("pattern", ""))
@@ -418,13 +555,18 @@ class AcornAgent:
             executor = self._tool_map.get(tool_name)
             if executor:
                 result = executor(args)
-                if result.startswith("Error"):
-                    had_errors = True
-                    self.ui.tool_result(f"[FAILED] {result}")
-                else:
-                    self.ui.tool_result(result)
+            elif parse_qualified_name(tool_name):
+                result = self._exec_mcp_tool(tool_name, args)
             else:
                 result = f"Unknown tool: {tool_name}"
+
+            if result.startswith("Error"):
+                had_errors = True
+                self.ui.tool_result(f"[FAILED] {result}")
+            elif tool_name in ("edit_file", "write_file"):
+                # The diff was already rendered; repeating the message is noise.
+                pass
+            else:
                 self.ui.tool_result(result)
 
             tool_results.append(types.Part.from_function_response(
@@ -624,6 +766,14 @@ class AcornAgent:
         self.ui.info(f"Auth:    {auth_mode}")
         self.ui.info(f"Model:   {self.settings.model} | Flash: {self.settings.flash_model}")
 
+        if self._mcp_started:
+            tool_count = len(self.mcp.all_tools())
+            self.ui.success(
+                f"MCP: {self._mcp_started} server(s), {tool_count} tools available"
+            )
+        if self._mcp_failed:
+            self.ui.info(f"MCP: {self._mcp_failed} server(s) failed to start — see /mcp")
+
         if self._has_project_config:
             self.ui.success("Loaded .acorn.toml config")
 
@@ -651,6 +801,23 @@ class AcornAgent:
 
         self.ui.info("Type /help for commands, /exit to quit\n")
 
+        try:
+            self._interactive_loop()
+        finally:
+            self.shutdown()
+
+    def shutdown(self) -> None:
+        """Reaps the persistent shell and any MCP servers we started."""
+        try:
+            self.runner.close()
+        except Exception:
+            pass
+        try:
+            self.mcp.stop_all()
+        except Exception:
+            pass
+
+    def _interactive_loop(self):
         while True:
             try:
                 user_input = self.ui.user_prompt()
@@ -701,6 +868,10 @@ class AcornAgent:
                     "routing": self.router.stats,
                     "backups": len(self._file_backups),
                     "cost": self.costs.format_cost(),
+                    "shell_mode": "persistent" if self.settings.persistent_shell else "one-shot",
+                    "shell_cwd": self.runner.current_dir(),
+                    "mcp_servers": len(self.mcp.servers),
+                    "mcp_tools": len(self.mcp.all_tools()),
                 })
                 continue
             elif cmd == '/undo':
@@ -728,11 +899,34 @@ class AcornAgent:
                 continue
             elif cmd == '/routing off':
                 self.settings.use_smart_routing = False
-                self.ui.success("Smart routing disabled.")
+                self.router.enabled = False
+                self.ui.success("Smart routing disabled — always using Pro.")
                 continue
             elif cmd == '/routing on':
                 self.settings.use_smart_routing = True
+                self.router.enabled = True
                 self.ui.success("Smart routing enabled.")
+                continue
+            elif cmd == '/routing':
+                self.ui.show_routing(self.router.enabled, self.router.last_decision)
+                continue
+            elif cmd == '/shell reset':
+                self.ui.success(self.runner.reset_shell())
+                continue
+            elif cmd == '/shell':
+                self.ui.show_shell(
+                    persistent=self.settings.persistent_shell,
+                    cwd=self.runner.current_dir(),
+                )
+                continue
+            elif cmd == '/mcp':
+                self.ui.show_mcp(self.mcp.status(), self.mcp.all_tools())
+                continue
+            elif cmd in ('/web on', '/web off'):
+                self.settings.web_enabled = cmd.endswith('on')
+                self._tools = self._build_tools()
+                state = "enabled" if self.settings.web_enabled else "disabled"
+                self.ui.success(f"Web tools {state}.")
                 continue
             elif cmd == '/config':
                 from acorn.config.settings import VERSION, ACORN_HOME

@@ -4,16 +4,51 @@ import signal
 import os
 from pathlib import Path
 
+from acorn.tools.shell import PersistentShell
+
 
 class CommandRunner:
-    """Executes shell commands with safety rails and timeout management."""
+    """Executes shell commands with safety rails and timeout management.
 
-    def __init__(self, working_dir: str = "."):
+    In persistent mode commands run in one long-lived shell, so `cd`, `export`,
+    and `source venv/bin/activate` carry over to later commands. One-shot mode
+    runs each command in its own process and is the safer fallback.
+    """
+
+    def __init__(self, working_dir: str = ".", persistent: bool = True):
         self.working_dir = Path(working_dir).resolve()
         self._processes: list[subprocess.Popen] = []
+        self.persistent = persistent
+        self._shell: PersistentShell | None = None
+
+    @property
+    def shell(self) -> PersistentShell:
+        """The persistent shell, started lazily on first use."""
+        if self._shell is None:
+            self._shell = PersistentShell(str(self.working_dir))
+            self._shell.start()
+        return self._shell
 
     def execute(self, command: str, timeout: int = 120) -> str:
-        """Executes a command and returns combined output. Timeout in seconds."""
+        """Runs a command, using the persistent shell when enabled."""
+        if self.persistent:
+            return self.shell.execute(command, timeout=timeout)
+        return self.execute_once(command, timeout=timeout)
+
+    def reset_shell(self) -> str:
+        """Clears accumulated shell state (cwd, exports, venv)."""
+        if self._shell is None:
+            return "No shell session to reset."
+        return self._shell.reset()
+
+    def current_dir(self) -> str:
+        """Where commands will actually run — the shell may have been `cd`'d."""
+        if self.persistent and self._shell is not None:
+            return self._shell.cwd()
+        return str(self.working_dir)
+
+    def execute_once(self, command: str, timeout: int = 120) -> str:
+        """Executes a command in its own process. Timeout in seconds."""
         try:
             process = subprocess.Popen(
                 command,
@@ -106,6 +141,10 @@ class CommandRunner:
         if not new_dir.is_dir():
             return f"Error: Not a directory: {path}"
         self.working_dir = new_dir
+        # Keep the persistent shell in step, otherwise it would keep running
+        # commands in the old directory.
+        if self._shell is not None and self._shell.is_alive:
+            self._shell.execute(f'cd "{new_dir}"', timeout=10)
         return f"Working directory changed to: {new_dir}"
 
     def kill_all(self) -> None:
@@ -115,3 +154,9 @@ class CommandRunner:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
             except (ProcessLookupError, OSError):
                 pass
+
+    def close(self) -> None:
+        """Shuts down the persistent shell, if one was started."""
+        if self._shell is not None:
+            self._shell.close()
+            self._shell = None
