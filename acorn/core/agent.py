@@ -501,16 +501,19 @@ class AcornAgent:
 
     def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
         """Streams a response with real-time text output."""
+        # Declared before the try: a Ctrl-C raised while the request is still
+        # being set up would otherwise hit the handler below with these unbound,
+        # turning a clean interrupt into an UnboundLocalError.
+        full_text = ""
+        all_parts = []
+        started_text = False
+
         try:
             response_stream = self.client.models.generate_content_stream(
                 model=model,
                 contents=contents,
                 config=config,
             )
-
-            full_text = ""
-            all_parts = []
-            started_text = False
 
             for chunk in response_stream:
                 if not chunk.candidates:
@@ -532,10 +535,9 @@ class AcornAgent:
 
         except KeyboardInterrupt:
             if started_text:
+                # Flush whatever was mid-line so the prompt isn't left ragged.
                 self.ui.stream_end_live()
             raise
-        except Exception as e:
-            raise e
 
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
         tool_results = []

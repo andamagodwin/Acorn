@@ -124,81 +124,102 @@ def _get_tool_verb(tool_name: str) -> str:
     return random.choice(verbs)
 
 
+def _inline_format(text: str) -> str:
+    """Applies inline markdown (bold, italic, code, links) to a single line."""
+    text = re.sub(r'`([^`]+)`', f'{Colors.BG_CODE}{Colors.GREEN} \\1 {Colors.RESET}', text)
+    text = re.sub(r'\*\*([^*]+)\*\*', f'{Colors.BOLD}\\1{Colors.RESET}', text)
+    text = re.sub(r'__([^_]+)__', f'{Colors.BOLD}\\1{Colors.RESET}', text)
+    text = re.sub(r'\*([^*]+)\*', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
+    text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', f'{Colors.UNDERLINE}{Colors.CYAN}\\1{Colors.RESET}', text)
+    return text
+
+
+class StreamingMarkdownRenderer:
+    """Renders markdown one complete line at a time.
+
+    Formatting a line needs the whole line — you can't tell `**bold**` from a
+    literal asterisk until the closing marker arrives. So output is buffered to
+    the newline and rendered then, which is what lets streamed responses come
+    out formatted instead of as raw markdown.
+
+    Code fences are emitted as they arrive rather than held until the block
+    closes, so a long code block still streams.
+    """
+
+    def __init__(self, indent: str = "  "):
+        self.indent = indent
+        self.reset()
+
+    def reset(self) -> None:
+        self._in_code_block = False
+
+    @property
+    def in_code_block(self) -> bool:
+        return self._in_code_block
+
+    def _border(self) -> str:
+        width = min(60, _term_width() - 6)
+        return f"{self.indent}{Colors.DIM}{Colors.CYAN}{'─' * width}{Colors.RESET}"
+
+    def feed_line(self, line: str) -> str:
+        """Renders one complete line, without a trailing newline."""
+        line = line.rstrip('\r')
+
+        if line.strip().startswith('```'):
+            self._in_code_block = not self._in_code_block
+            return self._border()
+
+        if self._in_code_block:
+            return f"{self.indent}{Colors.GREEN}{line}{Colors.RESET}"
+
+        if line.startswith('### '):
+            return f"{self.indent}{Colors.BOLD}{Colors.AMBER}{line[4:]}{Colors.RESET}"
+        if line.startswith('## '):
+            return f"{self.indent}{Colors.BOLD}{Colors.AMBER}{line[3:]}{Colors.RESET}"
+        if line.startswith('# '):
+            return f"{self.indent}{Colors.BOLD}{Colors.AMBER}{line[2:]}{Colors.RESET}"
+
+        stripped = line.strip()
+        if stripped.startswith('* ') or stripped.startswith('- '):
+            depth = len(line) - len(line.lstrip())
+            content = _inline_format(stripped[2:].lstrip())
+            return f"{self.indent}{' ' * depth}{Colors.AMBER}>{Colors.RESET} {content}"
+
+        numbered = re.match(r'^(\s*)(\d+\.)\s+(.*)', line)
+        if numbered:
+            depth, marker, content = numbered.groups()
+            return (
+                f"{self.indent}{depth}{Colors.BOLD}{Colors.AMBER}{marker}{Colors.RESET} "
+                f"{_inline_format(content)}"
+            )
+
+        return f"{self.indent}{_inline_format(line)}"
+
+    def flush(self) -> str:
+        """Closes an unterminated code block so the border isn't left dangling."""
+        if self._in_code_block:
+            self._in_code_block = False
+            return self._border()
+        return ""
+
+
 class MarkdownRenderer:
     """Converts markdown text to ANSI-formatted terminal output."""
 
     @staticmethod
     def render(text: str) -> str:
-        lines = text.split('\n')
-        rendered_lines = []
-        in_code_block = False
-        code_block_lines = []
-        code_lang = ""
-
-        for line in lines:
-            if line.strip().startswith('```'):
-                if in_code_block:
-                    width = min(60, _term_width() - 6)
-                    rendered_lines.append(f"  {Colors.DIM}{Colors.CYAN}{'─' * width}{Colors.RESET}")
-                    for cl in code_block_lines:
-                        rendered_lines.append(f"  {Colors.GREEN}{cl}{Colors.RESET}")
-                    rendered_lines.append(f"  {Colors.DIM}{Colors.CYAN}{'─' * width}{Colors.RESET}")
-                    code_block_lines = []
-                    code_lang = ""
-                    in_code_block = False
-                else:
-                    code_lang = line.strip()[3:]
-                    in_code_block = True
-                continue
-
-            if in_code_block:
-                code_block_lines.append(line)
-                continue
-
-            if line.startswith('### '):
-                rendered_lines.append(f"  {Colors.BOLD}{Colors.AMBER}{line[4:]}{Colors.RESET}")
-                continue
-            elif line.startswith('## '):
-                rendered_lines.append(f"  {Colors.BOLD}{Colors.AMBER}{line[3:]}{Colors.RESET}")
-                continue
-            elif line.startswith('# '):
-                rendered_lines.append(f"  {Colors.BOLD}{Colors.AMBER}{line[2:]}{Colors.RESET}")
-                continue
-
-            if line.strip().startswith('* ') or line.strip().startswith('- '):
-                indent = len(line) - len(line.lstrip())
-                content = line.strip()[2:]
-                content = MarkdownRenderer._inline_format(content)
-                rendered_lines.append(f"  {' ' * indent}{Colors.AMBER}>{Colors.RESET} {content}")
-                continue
-
-            numbered = re.match(r'^(\s*)\d+\.\s+(.*)', line)
-            if numbered:
-                indent = numbered.group(1)
-                content = MarkdownRenderer._inline_format(numbered.group(2))
-                rendered_lines.append(f"  {indent}{content}")
-                continue
-
-            rendered_lines.append(f"  {MarkdownRenderer._inline_format(line)}")
-
-        if in_code_block and code_block_lines:
-            width = min(60, _term_width() - 6)
-            rendered_lines.append(f"  {Colors.DIM}{Colors.CYAN}{'─' * width}{Colors.RESET}")
-            for cl in code_block_lines:
-                rendered_lines.append(f"  {Colors.GREEN}{cl}{Colors.RESET}")
-            rendered_lines.append(f"  {Colors.DIM}{Colors.CYAN}{'─' * width}{Colors.RESET}")
-
-        return '\n'.join(rendered_lines)
+        # Shares the streaming renderer so both paths format identically.
+        renderer = StreamingMarkdownRenderer()
+        rendered = [renderer.feed_line(line) for line in text.split('\n')]
+        tail = renderer.flush()
+        if tail:
+            rendered.append(tail)
+        return '\n'.join(rendered)
 
     @staticmethod
     def _inline_format(text: str) -> str:
-        text = re.sub(r'`([^`]+)`', f'{Colors.BG_CODE}{Colors.GREEN} \\1 {Colors.RESET}', text)
-        text = re.sub(r'\*\*([^*]+)\*\*', f'{Colors.BOLD}\\1{Colors.RESET}', text)
-        text = re.sub(r'__([^_]+)__', f'{Colors.BOLD}\\1{Colors.RESET}', text)
-        text = re.sub(r'\*([^*]+)\*', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
-        text = re.sub(r'(?<!\w)_([^_]+)_(?!\w)', f'{Colors.ITALIC}\\1{Colors.RESET}', text)
-        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', f'{Colors.UNDERLINE}{Colors.CYAN}\\1{Colors.RESET}', text)
-        return text
+        return _inline_format(text)
 
 
 class Spinner:
@@ -270,6 +291,8 @@ class TerminalUI:
 
     def __init__(self):
         self.md = MarkdownRenderer()
+        self._stream_renderer = StreamingMarkdownRenderer()
+        self._stream_buffer = ""
 
     def banner(self):
         from acorn.config.settings import VERSION
@@ -312,24 +335,34 @@ class TerminalUI:
     def stream_start_live(self):
         """Called when live streaming begins — print the Acorn header."""
         print(f"\n  {Colors.BROWN}{Colors.BOLD}Acorn{Colors.RESET}")
-        sys.stdout.write(f"  ")
         sys.stdout.flush()
         self._stream_buffer = ""
-        self._stream_line_started = True
+        self._stream_renderer.reset()
 
     def stream_chunk_live(self, text: str):
-        """Streams text to terminal in real-time with basic formatting."""
-        for char in text:
-            if char == '\n':
-                sys.stdout.write(f"\n  ")
-                sys.stdout.flush()
-            else:
-                sys.stdout.write(char)
-                sys.stdout.flush()
+        """Streams text to the terminal, formatting each line as it completes.
+
+        Buffers to the newline because markdown can't be resolved mid-line:
+        `**bold**` is indistinguishable from a literal asterisk until its
+        closing marker arrives.
+        """
+        self._stream_buffer += text
+        if '\n' not in self._stream_buffer:
+            return
+
+        *complete, self._stream_buffer = self._stream_buffer.split('\n')
+        for line in complete:
+            sys.stdout.write(self._stream_renderer.feed_line(line) + "\n")
+        sys.stdout.flush()
 
     def stream_end_live(self):
         """Finalizes live streaming output."""
-        sys.stdout.write("\n")
+        if self._stream_buffer:
+            sys.stdout.write(self._stream_renderer.feed_line(self._stream_buffer) + "\n")
+            self._stream_buffer = ""
+        tail = self._stream_renderer.flush()
+        if tail:
+            sys.stdout.write(tail + "\n")
         sys.stdout.flush()
 
     def stream_response_formatted(self, full_text: str):
