@@ -7,6 +7,7 @@ needs no credentials, so search works on a fresh install with nothing configured
 import gzip
 import html
 import io
+import os
 import re
 import ssl
 import urllib.error
@@ -51,6 +52,43 @@ BLOCK_BREAK = re.compile(
 BR = re.compile(r"<br\s*/?>", re.IGNORECASE)
 BLANK_LINES = re.compile(r"\n{3,}")
 SPACES = re.compile(r"[ \t]{2,}")
+
+
+_ssl_context_cache: ssl.SSLContext | None = None
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """Builds the TLS context used for every request.
+
+    urllib verifies against the system OpenSSL trust store, which on macOS is
+    frequently empty unless the Python installer's "Install Certificates"
+    step was run. That's why `pip` can work on a machine where a plain urllib
+    request fails: pip and requests ship certifi instead of trusting the system
+    store. certifi comes along with our own dependencies, so prefer it and fall
+    back to the default only when it's missing.
+    """
+    global _ssl_context_cache
+    if _ssl_context_cache is not None:
+        return _ssl_context_cache
+
+    # An explicitly configured bundle wins — that's how users point us at a
+    # corporate proxy's CA.
+    for env_var in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        bundle = os.environ.get(env_var)
+        if bundle and os.path.exists(bundle):
+            try:
+                _ssl_context_cache = ssl.create_default_context(cafile=bundle)
+                return _ssl_context_cache
+            except (ssl.SSLError, OSError):
+                pass
+
+    try:
+        import certifi
+        _ssl_context_cache = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        _ssl_context_cache = ssl.create_default_context()
+
+    return _ssl_context_cache
 
 
 def _explain_url_error(error: urllib.error.URLError, target: str) -> str:
@@ -99,7 +137,7 @@ def _open(url: str, data: bytes | None = None, timeout: int = DEFAULT_TIMEOUT) -
             "Accept-Encoding": "gzip",
         },
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=timeout, context=_ssl_context()) as response:
         raw = response.read(MAX_PAGE_BYTES)
         if response.headers.get("Content-Encoding") == "gzip":
             try:

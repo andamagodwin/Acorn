@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 
 ACORN_HOME = Path.home() / ".acorn"
 SESSIONS_DIR = ACORN_HOME / "sessions"

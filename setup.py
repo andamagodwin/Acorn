@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="acorn-agent",
-    version="2.3.0",
+    version="2.3.1",
     description="An autonomous coding agent that lives in your terminal",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
