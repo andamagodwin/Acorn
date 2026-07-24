@@ -96,14 +96,62 @@ TOOL_VERBS = {
     ],
 }
 
-THINKING_MESSAGES = [
-    "Pondering", "Cooking up something", "Brainstorming",
-    "Churning the gears", "Consulting the neural pathways",
-    "Assembling thoughts", "Marinating on that",
-    "Doing some mental gymnastics", "Scheming",
-    "Loading brain.exe", "Crunching the vibes",
-    "Summoning wisdom", "Connecting the dots",
-]
+# Thinking messages, grouped so the wording can match what's actually
+# happening — troubleshooting after a failed tool call reads very differently
+# from planning a fresh request.
+THINKING_CATEGORIES = {
+    "deep": [
+        "Deep thinking", "Analyzing", "Evaluating", "Assessing", "Examining",
+        "Scrutinizing", "Investigating", "Interpreting", "Deconstructing",
+    ],
+    "creative": [
+        "Creative thinking", "Brainstorming", "Ideating", "Imagining",
+        "Envisioning", "Innovating", "Dreaming", "Conceptualizing", "Visualizing",
+    ],
+    "solving": [
+        "Problem solving", "Figuring out", "Working through", "Solving",
+        "Troubleshooting", "Deciphering", "Resolving", "Strategizing",
+    ],
+    "deciding": [
+        "Decision making", "Judging", "Choosing", "Weighing options",
+        "Determining", "Concluding", "Deciding",
+    ],
+    "reflective": [
+        "Reflective thinking", "Musing", "Meditating", "Ruminating",
+        "Reflecting", "Introspecting", "Recollecting", "Reminiscing",
+    ],
+    "planning": [
+        "Planning", "Forecasting", "Anticipating", "Mapping out",
+        "Organizing", "Designing", "Architecting",
+    ],
+    "technical": [
+        "Processing", "Inference", "Computation", "Reasoning", "Modeling",
+        "Pattern recognition", "Sense-making", "Decision intelligence",
+    ],
+}
+
+# Which categories suit which moment. Picking from a themed subset keeps the
+# status honest instead of purely random.
+THINKING_CONTEXTS = {
+    # Reasoning over what the tools just returned.
+    "thinking": ("deep", "technical"),
+    # Opening a turn — nothing has been read yet, so it's framing and choosing.
+    "planning": ("planning", "creative", "deciding"),
+    # Recovering from a tool that failed.
+    "solving": ("solving", "deep"),
+    # Flash: short waits, so keep the wording matter-of-fact.
+    "fast": ("technical",),
+    # Compacting history — the one moment "Recollecting" is literally accurate.
+    "recalling": ("reflective",),
+}
+
+THINKING_MESSAGES = [m for group in THINKING_CATEGORIES.values() for m in group]
+
+
+def _pick_thinking_message(context: str = "thinking") -> str:
+    categories = THINKING_CONTEXTS.get(context, tuple(THINKING_CATEGORIES))
+    pool = [m for name in categories for m in THINKING_CATEGORIES.get(name, ())]
+    return random.choice(pool or THINKING_MESSAGES)
 
 
 def _term_width() -> int:
@@ -223,67 +271,98 @@ class MarkdownRenderer:
 
 
 class Spinner:
-    """Animated thinking spinner with fun messages."""
+    """Animated status line shown while the model is working.
 
-    FRAMES = ["    ", ".   ", "..  ", "... ", "....", " ...", "  ..", "   ."]
+    Rotates through a themed message pool rather than sitting on one phrase,
+    because a long wait under a frozen label reads as a hang. Elapsed seconds
+    appear once the wait is long enough to be worth knowing about.
+    """
 
-    def __init__(self, message: str = None):
-        self.message = message or random.choice(THINKING_MESSAGES)
+    DOTS = ["", ".", "..", "..."]
+    PULSE = [Colors.DIM, Colors.DIM, "", "", Colors.DIM]
+
+    FRAME_INTERVAL = 0.28
+    ELAPSED_AFTER = 3.0
+    ROTATE_AFTER = 7.0
+
+    def __init__(self, message: str = None, context: str = "thinking",
+                 show_elapsed: bool = True):
+        self.context = context
+        self._fixed_message = message
+        self.message = message or _pick_thinking_message(context)
+        self.show_elapsed = show_elapsed
         self._running = False
         self._thread = None
+        self._started_at = 0.0
 
     def start(self):
+        if self._running:
+            return
         self._running = True
+        self._started_at = time.monotonic()
         self._thread = threading.Thread(target=self._spin, daemon=True)
         self._thread.start()
 
     def stop(self):
+        """Stops the animation and clears the line it was drawn on."""
+        if not self._running:
+            return
         self._running = False
         if self._thread:
-            self._thread.join()
+            self._thread.join(timeout=1.0)
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
 
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self._started_at if self._started_at else 0.0
+
     def _spin(self):
-        i = 0
+        frame = 0
+        last_rotation = time.monotonic()
+
         while self._running:
-            frame = self.FRAMES[i % len(self.FRAMES)]
-            sys.stdout.write(f"\r  {Colors.DIM}{self.message}{frame}{Colors.RESET}")
+            now = time.monotonic()
+
+            # Swap in a new phrase periodically so a long wait still feels live.
+            if self._fixed_message is None and now - last_rotation >= self.ROTATE_AFTER:
+                choice = _pick_thinking_message(self.context)
+                if choice != self.message:
+                    self.message = choice
+                    last_rotation = now
+
+            dots = self.DOTS[frame % len(self.DOTS)]
+            shade = self.PULSE[frame % len(self.PULSE)]
+
+            elapsed = now - self._started_at
+            suffix = ""
+            if self.show_elapsed and elapsed >= self.ELAPSED_AFTER:
+                suffix = f"  {Colors.GRAY}{self._format_elapsed(elapsed)}{Colors.RESET}"
+
+            # \033[K clears the rest of the line, so a shorter message can't
+            # leave characters behind from a longer previous one.
+            sys.stdout.write(
+                f"\r\033[K  {shade}{Colors.AMBER}*{Colors.RESET} "
+                f"{shade}{self.message}{dots}{Colors.RESET}{suffix}"
+            )
             sys.stdout.flush()
-            time.sleep(0.15)
-            i += 1
+
+            time.sleep(self.FRAME_INTERVAL)
+            frame += 1
+
+    @staticmethod
+    def _format_elapsed(seconds: float) -> str:
+        if seconds < 60:
+            return f"{seconds:.0f}s"
+        minutes, secs = divmod(int(seconds), 60)
+        return f"{minutes}m{secs:02d}s"
 
 
-class ToolSpinner:
-    """Brief animated indicator for tool execution."""
-
-    FRAMES = ["|", "/", "-", "\\"]
+class ToolSpinner(Spinner):
+    """Spinner for tool execution — fixed label, no message rotation."""
 
     def __init__(self, message: str):
-        self.message = message
-        self._running = False
-        self._thread = None
-
-    def start(self):
-        self._running = True
-        self._thread = threading.Thread(target=self._spin, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-        if self._thread:
-            self._thread.join()
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
-
-    def _spin(self):
-        i = 0
-        while self._running:
-            frame = self.FRAMES[i % len(self.FRAMES)]
-            sys.stdout.write(f"\r  {Colors.CYAN}{frame}{Colors.RESET} {Colors.DIM}{self.message}{Colors.RESET}")
-            sys.stdout.flush()
-            time.sleep(0.1)
-            i += 1
+        super().__init__(message=message, show_elapsed=True)
 
 
 class TerminalUI:

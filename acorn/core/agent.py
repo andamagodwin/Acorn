@@ -499,7 +499,8 @@ class AcornAgent:
 
     # --- Streaming ---
 
-    def _stream_response(self, model: str, contents: list, config) -> tuple[str, list]:
+    def _stream_response(self, model: str, contents: list, config,
+                         context: str = "thinking") -> tuple[str, list]:
         """Streams a response with real-time text output."""
         # Declared before the try: a Ctrl-C raised while the request is still
         # being set up would otherwise hit the handler below with these unbound,
@@ -507,6 +508,11 @@ class AcornAgent:
         full_text = ""
         all_parts = []
         started_text = False
+
+        # Something has to fill the gap between the request going out and the
+        # first token coming back, which can be several seconds on Pro.
+        spinner = Spinner(context=context)
+        spinner.start()
 
         try:
             response_stream = self.client.models.generate_content_stream(
@@ -516,6 +522,9 @@ class AcornAgent:
             )
 
             for chunk in response_stream:
+                # The wait is over as soon as anything arrives; stop() is
+                # idempotent so the later calls are no-ops.
+                spinner.stop()
                 if not chunk.candidates:
                     continue
                 for part in chunk.candidates[0].content.parts:
@@ -538,6 +547,10 @@ class AcornAgent:
                 # Flush whatever was mid-line so the prompt isn't left ragged.
                 self.ui.stream_end_live()
             raise
+        finally:
+            # Covers the error paths too — a spinner thread left running would
+            # keep overwriting whatever gets printed next.
+            spinner.stop()
 
     def _handle_tool_calls_with_retry(self, parts: list, contents: list, config, model: str) -> tuple[list, bool]:
         tool_results = []
@@ -634,22 +647,29 @@ class AcornAgent:
         max_iterations = 25
         iteration = 0
         retry_count = 0
+        # Picks which pool the status messages come from. Starts as planning
+        # (nothing has been looked at yet) and shifts as the turn unfolds.
+        think_context = "fast" if model == self.settings.flash_model else "planning"
 
         while iteration < max_iterations:
             iteration += 1
 
             try:
                 if self.settings.streaming:
-                    full_text, tool_parts = self._stream_response(model, contents, config)
-                else:
-                    spinner = Spinner("Thinking")
-                    spinner.start()
-                    response = self.client.models.generate_content(
-                        model=model,
-                        contents=contents,
-                        config=config,
+                    full_text, tool_parts = self._stream_response(
+                        model, contents, config, context=think_context
                     )
-                    spinner.stop()
+                else:
+                    spinner = Spinner(context=think_context)
+                    spinner.start()
+                    try:
+                        response = self.client.models.generate_content(
+                            model=model,
+                            contents=contents,
+                            config=config,
+                        )
+                    finally:
+                        spinner.stop()
                     full_text = response.text or ""
                     tool_parts = [
                         p for p in response.candidates[0].content.parts
@@ -688,6 +708,10 @@ class AcornAgent:
                     parts=tool_results,
                 ))
 
+                # A failed tool means the next turn is recovery work; otherwise
+                # it's reasoning over whatever the tools just returned.
+                think_context = "solving" if had_errors else "thinking"
+
                 if had_errors and self.settings.auto_retry_on_error:
                     self.ui.info("[Adapting to error...]")
 
@@ -705,8 +729,15 @@ class AcornAgent:
                     self._save_session()
 
                 if self.context.needs_compaction:
-                    self.ui.info("[Compacting context...]")
-                    self.context.compact(self._summarize)
+                    # Compaction is a blocking model call; don't leave the
+                    # terminal silent while it runs.
+                    spinner = Spinner(context="recalling")
+                    spinner.start()
+                    try:
+                        self.context.compact(self._summarize)
+                    finally:
+                        spinner.stop()
+                    self.ui.info("[Context compacted]")
 
                 return final_text
 
