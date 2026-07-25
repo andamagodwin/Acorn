@@ -34,3 +34,8 @@ Thumbs.db
 venv/
 .venv/
 env/
+
+# npm wrapper: venv is built on the user's machine at install time
+npm/.venv/
+npm/*.tgz
+npm/node_modules/

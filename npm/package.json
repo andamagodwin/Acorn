@@ -1,0 +1,46 @@
+{
+  "name": "acorn-agent",
+  "version": "2.3.1",
+  "description": "An autonomous coding agent that lives in your terminal — powered by Gemini",
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "gemini",
+    "vertex-ai",
+    "cli",
+    "autonomous",
+    "mcp",
+    "terminal"
+  ],
+  "homepage": "https://acorncli.dev",
+  "bugs": "https://github.com/andamagodwin/acorn/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andamagodwin/acorn.git",
+    "directory": "npm"
+  },
+  "license": "MIT",
+  "author": "Andama Godwin",
+  "bin": {
+    "acorn": "bin/acorn.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node test/launcher.test.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "scripts/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "preferGlobal": true,
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ]
+}

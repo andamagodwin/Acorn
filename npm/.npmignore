@@ -1,0 +1,4 @@
+# The private venv is built at install time on the user's machine, never shipped.
+.venv/
+test/
+*.tgz
