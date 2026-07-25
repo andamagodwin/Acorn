@@ -1,7 +1,7 @@
 {
   "name": "acorn-agent",
   "version": "2.3.1",
-  "description": "An autonomous coding agent that lives in your terminal — powered by Gemini",
+  "description": "An autonomous coding agent that lives in your terminal \u2014 powered by Gemini",
   "keywords": [
     "ai",
     "coding-agent",
@@ -26,7 +26,8 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "test": "node test/launcher.test.js"
+    "test": "node test/launcher.test.js",
+    "build:package": "node build/make-platform-package.js"
   },
   "files": [
     "bin/",
@@ -42,5 +43,12 @@
     "darwin",
     "linux",
     "win32"
-  ]
+  ],
+  "optionalDependencies": {
+    "acorn-agent-darwin-arm64": "2.3.1",
+    "acorn-agent-darwin-x64": "2.3.1",
+    "acorn-agent-linux-x64": "2.3.1",
+    "acorn-agent-linux-arm64": "2.3.1",
+    "acorn-agent-win32-x64": "2.3.1"
+  }
 }

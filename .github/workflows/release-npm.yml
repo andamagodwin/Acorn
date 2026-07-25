@@ -1,0 +1,221 @@
+name: Release to npm
+
+# Builds a standalone Acorn binary per platform, wraps each in its own npm
+# package, and publishes them alongside the main launcher package.
+#
+# Binaries must be built on their target OS — PyInstaller bundles the running
+# interpreter and its native extensions, so there is no cross-compiling. Linux
+# arm64 is the exception and uses QEMU, since GitHub's arm64 Linux runners are
+# not available on all plans.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify without publishing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      # Keep going so one broken platform still tells us about the others.
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-14
+            platform: darwin
+            arch: arm64
+          - target: darwin-x64
+            runner: macos-13
+            platform: darwin
+            arch: x64
+          - target: linux-x64
+            runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - target: win32-x64
+            runner: windows-2022
+            platform: win32
+            arch: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Oldest supported version: a binary built on 3.11 runs everywhere
+          # 3.11+ does, while one built on 3.14 can emit newer bytecode and
+          # link against newer symbols than older hosts provide.
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install .
+
+      - name: Build binary
+        run: pyinstaller npm/build/acorn.spec --clean --noconfirm
+
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          BIN="dist/acorn"
+          [ "${{ matrix.platform }}" = "win32" ] && BIN="dist/acorn.exe"
+          # --version exercises startup and argument parsing without needing
+          # credentials or network access.
+          "$BIN" --version
+          "$BIN" --help > /dev/null
+          echo "smoke test passed: $("$BIN" --version)"
+
+      - name: Assemble npm package
+        shell: bash
+        run: |
+          BIN="dist/acorn"
+          [ "${{ matrix.platform }}" = "win32" ] && BIN="dist/acorn.exe"
+          node npm/build/make-platform-package.js \
+            --binary "$BIN" \
+            --platform "${{ matrix.platform }}" \
+            --arch "${{ matrix.arch }}" \
+            --version "$(node -p "require('./npm/package.json').version")" \
+            --outdir npm-dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.target }}
+          path: npm-dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  # QEMU-emulated, so it is slow and kept separate from the native matrix.
+  build-linux-arm64:
+    name: linux-arm64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build binary under emulation
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD:/src" -w /src \
+            python:3.11-slim bash -c '
+              set -e
+              # PyInstaller needs a toolchain to link its bootloader, and
+              # cryptography may build from source on arm64.
+              apt-get update -qq && apt-get install -y -qq binutils gcc
+              pip install --quiet --upgrade pip
+              pip install --quiet pyinstaller
+              pip install --quiet .
+              pyinstaller npm/build/acorn.spec --clean --noconfirm
+              ./dist/acorn --version
+            '
+
+      - name: Assemble npm package
+        run: |
+          node npm/build/make-platform-package.js \
+            --binary dist/acorn \
+            --platform linux \
+            --arch arm64 \
+            --version "$(node -p "require('./npm/package.json').version")" \
+            --outdir npm-dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-linux-arm64
+          path: npm-dist/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    name: Publish
+    needs: [build, build-linux-arm64]
+    runs-on: ubuntu-22.04
+    environment: npm-publish
+    permissions:
+      contents: read
+      # Required by `npm publish --provenance`, which signs the package with a
+      # verifiable link back to this workflow run. Publishing fails without it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Verify every platform package arrived
+        run: |
+          set -e
+          missing=0
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+            dir="artifacts/acorn-agent-$target"
+            if [ ! -d "$dir" ]; then
+              echo "missing: $dir"
+              missing=1
+            else
+              # A truncated upload would publish a broken binary.
+              size=$(du -m "$dir" | tail -1 | cut -f1)
+              echo "$target: ${size}MB"
+              [ "$size" -lt 5 ] && { echo "  suspiciously small"; missing=1; }
+            fi
+          done
+          [ "$missing" -eq 0 ] || { echo "refusing to publish a partial release"; exit 1; }
+
+      - name: Run launcher tests
+        working-directory: npm
+        run: node test/launcher.test.js
+
+      - name: Publish platform packages
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          # Platform packages first: the main package declares them as
+          # optionalDependencies at an exact version, so publishing it first
+          # would leave a window where it resolves to nothing.
+          for dir in artifacts/acorn-agent-*/; do
+            echo "publishing $dir"
+            (cd "$dir" && npm publish --access public --provenance)
+          done
+
+      - name: Publish main package
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        working-directory: npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Dry run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          echo "Dry run: built and verified, published nothing."
+          ls -la artifacts/

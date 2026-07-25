@@ -118,6 +118,50 @@ test("PythonMissingError explains how to fix it", () => {
   assert.match(error.message, /ACORN_PYTHON/, "should mention the override");
 });
 
+// --- resolution tests ------------------------------------------------------
+
+const resolveLib = require("../lib/resolve");
+
+test("platform package name matches the host", () => {
+  assert.strictEqual(
+    resolveLib.platformPackageName("darwin", "arm64"),
+    "acorn-agent-darwin-arm64"
+  );
+  assert.strictEqual(
+    resolveLib.platformPackageName("win32", "x64"),
+    "acorn-agent-win32-x64"
+  );
+});
+
+test("returns null when no platform package is installed", () => {
+  // Nothing is installed in the repo checkout, so this must not throw — the
+  // Python fallback depends on a clean null rather than an exception.
+  assert.strictEqual(resolveLib.findBundledBinary(), null);
+});
+
+test("every optionalDependency has a generator target", () => {
+  const { optionalDependencies, version } = require("../package.json");
+  const { SUPPORTED } = require("../build/make-platform-package.js");
+  const names = Object.keys(optionalDependencies);
+  assert.ok(names.length > 0, "should declare platform packages");
+  for (const name of names) {
+    const key = name.replace(/^acorn-agent-/, "");
+    assert.ok(SUPPORTED[key], `${name} has no build target`);
+    assert.strictEqual(
+      optionalDependencies[name],
+      version,
+      `${name} must be pinned to the main package version`
+    );
+  }
+  // And the reverse: nothing buildable is left unpublished.
+  for (const key of Object.keys(SUPPORTED)) {
+    assert.ok(
+      names.includes(`acorn-agent-${key}`),
+      `build target ${key} is missing from optionalDependencies`
+    );
+  }
+});
+
 // --- launcher tests --------------------------------------------------------
 
 if (process.platform === "win32") {

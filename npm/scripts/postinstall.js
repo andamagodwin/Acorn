@@ -10,8 +10,18 @@
  * worst case is a slower first start.
  */
 
+const resolve = require("../lib/resolve");
 const setup = require("../lib/setup");
 const { version: PACKAGE_VERSION } = require("../package.json");
+
+const note = (message) => console.log(`acorn: ${message}`);
+
+// Nothing to do in the common case: the platform package supplied a standalone
+// binary, so Python is not involved at all.
+if (resolve.findBundledBinary()) {
+  note(`ready (${process.platform}-${process.arch} binary). Run \`acorn\` to start.`);
+  process.exit(0);
+}
 
 // Respect the usual opt-outs for packages that do work at install time.
 if (process.env.ACORN_SKIP_POSTINSTALL || process.env.CI === "true") {
@@ -20,7 +30,7 @@ if (process.env.ACORN_SKIP_POSTINSTALL || process.env.CI === "true") {
   process.exit(0);
 }
 
-const note = (message) => console.log(`acorn: ${message}`);
+note(`no prebuilt binary for ${process.platform}-${process.arch}; falling back to Python.`);
 
 const python = setup.findPython();
 if (!python.ok) {

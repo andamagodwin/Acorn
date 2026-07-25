@@ -16,25 +16,44 @@ acorn
 
 ## Requirements
 
-- **Node.js 18+** — to run the installer and launcher
-- **Python 3.11+** — Acorn itself is written in Python
+- **Node.js 18+**
 - A **Gemini API key** (free at [aistudio.google.com](https://aistudio.google.com/apikey)) or a **GCP project** for Vertex AI
 
-On first run Acorn asks which one you want to use and saves your choice.
+**No Python needed** on the platforms below — the binary is self-contained.
+
+On first run Acorn asks which auth you want to use and saves your choice.
+
+## Supported platforms
+
+| Platform | Prebuilt binary |
+|---|---|
+| macOS (Apple Silicon) | yes |
+| macOS (Intel) | yes |
+| Linux (x86_64) | yes |
+| Linux (arm64) | yes |
+| Windows (x86_64) | yes |
+
+Anything else falls back to Python (see below), which needs **Python 3.11+**.
 
 ## How this package works
 
-Acorn is a Python program, and npm can't install Python packages. So this
-package is a thin launcher: it finds a suitable Python, creates a **private
-virtual environment**, installs [`acorn-agent`](https://pypi.org/project/acorn-agent/)
-from PyPI into it, and runs that.
+Acorn is written in Python, so npm can't install it directly. This package
+handles that in two ways, preferring the first:
 
-The environment is private deliberately — Acorn never installs into your system
-or active Python, so an unrelated `pip install` can't break it, and nothing is
-left behind when you uninstall.
+**1. Prebuilt binary.** `acorn-agent` declares one `acorn-agent-<platform>-<arch>`
+package per platform as an optional dependency. Each carries `os` and `cpu`
+fields, so npm downloads only the one matching your machine — a single
+self-contained binary with Python and every dependency baked in. Nothing else is
+required.
 
-Setup runs once at install time. If it can't (no Python yet, or you installed
-with `--ignore-scripts`), it runs on your first `acorn` instead.
+**2. Python fallback.** On a platform with no prebuilt binary, or if optional
+dependencies were skipped, the launcher finds a Python 3.11+, creates a
+**private virtual environment**, and installs
+[`acorn-agent`](https://pypi.org/project/acorn-agent/) from PyPI into it.
+
+The venv is private deliberately — Acorn never installs into your system or
+active Python, so an unrelated `pip install` can't break it, and nothing is left
+behind when you uninstall.
 
 ### Already have Python tooling?
 
@@ -74,11 +93,20 @@ Rebuild it from scratch:
 npm rebuild acorn-agent
 ```
 
+**It's using Python when I expected the binary**
+
+Optional dependencies were probably skipped. Reinstall without `--no-optional`,
+and check your package manager isn't configured to omit them:
+
+```bash
+npm install -g acorn-agent
+```
+
 **Nothing happened during install**
 
 Some setups disable install scripts (`--ignore-scripts`, or certain pnpm/Bun
-configs). That's fine — run `acorn` and it will set itself up, printing progress
-as it goes.
+configs). That's fine — the binary path needs no install step at all, and the
+Python fallback sets itself up on first `acorn`.
 
 ## Links
 

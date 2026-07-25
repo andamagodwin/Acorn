@@ -4,13 +4,16 @@
 /**
  * `acorn` entry point for the npm distribution.
  *
- * Execs the real Python CLI from a private venv, forwarding arguments, stdio,
- * signals, and the exit code. If the venv isn't there — a fresh install with
- * `--ignore-scripts`, or an interrupted postinstall — it is built on first run
- * rather than failing.
+ * Prefers a prebuilt standalone binary from the matching platform package,
+ * which needs no Python. Falls back to building a private Python venv from PyPI
+ * for hosts with no prebuilt binary, or installs where optional dependencies
+ * were skipped.
+ *
+ * Either way it forwards arguments, stdio, signals, and the exit code.
  */
 
 const { spawn } = require("node:child_process");
+const resolve = require("../lib/resolve");
 const setup = require("../lib/setup");
 
 const { version: PACKAGE_VERSION } = require("../package.json");
@@ -21,14 +24,21 @@ function fail(message) {
 }
 
 function resolveExecutable() {
+  // Fast path: the prebuilt binary for this platform.
+  const bundled = resolve.findBundledBinary();
+  if (bundled) return bundled;
+
   const existing = setup.findExistingVenv();
   if (existing) return setup.venvExecutable(existing);
 
-  // First run after `--ignore-scripts`, or postinstall failed. Announce it —
-  // building a venv takes a few seconds and silence looks like a hang. Output
-  // is captured rather than inherited so the full pip log doesn't bury the
-  // reason someone ran `acorn` in the first place; it's replayed on failure.
-  process.stderr.write("acorn: first run — setting up Python environment (~30s)...\n");
+  // No prebuilt binary for this host, or optional dependencies were skipped.
+  // Announce the fallback — building a venv takes a few seconds and silence
+  // looks like a hang. Output is captured rather than inherited so the full pip
+  // log doesn't bury the reason someone ran `acorn`; it's replayed on failure.
+  process.stderr.write(
+    `acorn: no prebuilt binary for ${process.platform}-${process.arch}; ` +
+      "using Python (one-time setup, ~30s)...\n"
+  );
   try {
     const executable = setup.install({ quiet: true, version: PACKAGE_VERSION });
     process.stderr.write("acorn: ready.\n");

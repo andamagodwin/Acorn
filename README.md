@@ -45,15 +45,17 @@ Acorn reads your code, writes files, runs commands, and refactors across your en
 # Install from PyPI
 pip install acorn-agent
 
-# ...or from npm (needs Python 3.11+ installed)
+# ...or from npm (no Python needed — ships a standalone binary)
 npm install -g acorn-agent
 
 # Run it
 acorn
 ```
 
-Both routes give you the same `acorn` command. The npm package is a launcher
-that manages its own private Python environment — see [`npm/README.md`](npm/README.md).
+Both routes give you the same `acorn` command. The npm package ships a
+self-contained binary per platform, so it needs no Python at all; on platforms
+without a prebuilt binary it falls back to managing its own private Python
+environment. See [`npm/README.md`](npm/README.md).
 
 On first run it will ask you to choose authentication:
 1. **Gemini API key** — get one free at [aistudio.google.com](https://aistudio.google.com/apikey) (easiest)
