@@ -5,7 +5,7 @@ setup(
     name="acorn-agent",
     version="2.3.1",
     description="An autonomous coding agent that lives in your terminal",
-    long_description=open("README.md").read(),
+    long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
     author="Andama Godwin",
     url="https://github.com/andamagodwin/Acorn",
