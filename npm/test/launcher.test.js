@@ -141,7 +141,7 @@ test("returns null when no platform package is installed", () => {
 
 test("every optionalDependency has a generator target", () => {
   const { optionalDependencies, version } = require("../package.json");
-  const { SUPPORTED } = require("../build/make-platform-package.js");
+  const { SUPPORTED } = require("../packaging/make-platform-package.js");
   const names = Object.keys(optionalDependencies);
   assert.ok(names.length > 0, "should declare platform packages");
   for (const name of names) {

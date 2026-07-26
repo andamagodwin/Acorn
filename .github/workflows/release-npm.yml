@@ -68,7 +68,7 @@ jobs:
           python -m pip install .
 
       - name: Build binary
-        run: pyinstaller npm/build/acorn.spec --clean --noconfirm
+        run: pyinstaller npm/packaging/acorn.spec --clean --noconfirm
 
       - name: Smoke test the binary
         shell: bash
@@ -86,7 +86,7 @@ jobs:
         run: |
           BIN="dist/acorn"
           [ "${{ matrix.platform }}" = "win32" ] && BIN="dist/acorn.exe"
-          node npm/build/make-platform-package.js \
+          node npm/packaging/make-platform-package.js \
             --binary "$BIN" \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
@@ -127,13 +127,13 @@ jobs:
               pip install --quiet --upgrade pip
               pip install --quiet pyinstaller
               pip install --quiet .
-              pyinstaller npm/build/acorn.spec --clean --noconfirm
+              pyinstaller npm/packaging/acorn.spec --clean --noconfirm
               ./dist/acorn --version
             '
 
       - name: Assemble npm package
         run: |
-          node npm/build/make-platform-package.js \
+          node npm/packaging/make-platform-package.js \
             --binary dist/acorn \
             --platform linux \
             --arch arm64 \

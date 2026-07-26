@@ -27,7 +27,7 @@
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
     "test": "node test/launcher.test.js",
-    "build:package": "node build/make-platform-package.js"
+    "build:package": "node packaging/make-platform-package.js"
   },
   "files": [
     "bin/",
