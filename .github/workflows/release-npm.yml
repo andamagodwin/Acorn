@@ -208,9 +208,28 @@ jobs:
           # Platform packages first: the main package declares them as
           # optionalDependencies at an exact version, so publishing it first
           # would leave a window where it resolves to nothing.
+          #
+          # Idempotent by design: npm permanently refuses to republish an
+          # existing name@version, so a retry after a partial failure must
+          # skip whatever already landed rather than error out on it.
+          #
+          # The sleep is a rate-limit mitigation. Five brand-new packages
+          # published back-to-back from a fresh token tripped npm's abuse
+          # heuristic ("Package name triggered spam detection") on the last
+          # one after four succeeded — spacing publishes out is the standard
+          # workaround for that.
           for dir in artifacts/acorn-agent-*/; do
+            name=$(node -p "require('./$dir/package.json').name")
+            version=$(node -p "require('./$dir/package.json').version")
+
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "skipping $name@$version — already published"
+              continue
+            fi
+
             echo "publishing $dir"
             (cd "$dir" && npm publish --access public --provenance)
+            sleep 10
           done
 
       - name: Publish main package
@@ -218,7 +237,16 @@ jobs:
         working-directory: npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public --provenance
+        run: |
+          set -e
+          name=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "skipping $name@$version — already published"
+          else
+            npm publish --access public --provenance
+          fi
 
       - name: Dry run summary
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
