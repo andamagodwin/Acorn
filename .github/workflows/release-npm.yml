@@ -7,6 +7,14 @@ name: Release to npm
 # interpreter and its native extensions, so there is no cross-compiling. Linux
 # arm64 is the exception and uses QEMU, since GitHub's arm64 Linux runners are
 # not available on all plans.
+#
+# No Windows binary: npm's abuse detection flags "acorn-agent-win32-x64" as
+# spam on every publish attempt, confirmed not rate-related by an isolated
+# retry that failed identically as the sole package being published. Windows
+# users fall back to the Python venv route in npm/lib/setup.js, which already
+# has its own Windows handling (the `py` launcher, Scripts/ layout). Revisit
+# under a scoped name (@andamagodwin/acorn-agent-win32-x64) if this matters
+# enough to fight — scoped packages skip the unscoped-name heuristic.
 
 on:
   push:
@@ -48,10 +56,6 @@ jobs:
             runner: ubuntu-22.04
             platform: linux
             arch: x64
-          - target: win32-x64
-            runner: windows-2022
-            platform: win32
-            arch: x64
 
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +84,6 @@ jobs:
         shell: bash
         run: |
           BIN="dist/acorn"
-          [ "${{ matrix.platform }}" = "win32" ] && BIN="dist/acorn.exe"
           # --version exercises startup and argument parsing without needing
           # credentials or network access.
           "$BIN" --version
@@ -90,10 +93,8 @@ jobs:
       - name: Assemble npm package
         shell: bash
         run: |
-          BIN="dist/acorn"
-          [ "${{ matrix.platform }}" = "win32" ] && BIN="dist/acorn.exe"
           node npm/packaging/make-platform-package.js \
-            --binary "$BIN" \
+            --binary "dist/acorn" \
             --platform "${{ matrix.platform }}" \
             --arch "${{ matrix.arch }}" \
             --version "$(node -p "require('./npm/package.json').version")" \
@@ -181,7 +182,7 @@ jobs:
         run: |
           set -e
           missing=0
-          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win32-x64; do
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             dir="artifacts/acorn-agent-$target"
             if [ ! -d "$dir" ]; then
               echo "missing: $dir"

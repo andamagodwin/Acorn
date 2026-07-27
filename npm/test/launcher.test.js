@@ -139,6 +139,12 @@ test("returns null when no platform package is installed", () => {
   assert.strictEqual(resolveLib.findBundledBinary(), null);
 });
 
+// win32-x64 stays buildable in make-platform-package.js (SUPPORTED) but is
+// deliberately left out of optionalDependencies: npm's abuse detection flags
+// the unscoped "acorn-agent-win32-x64" name as spam on every publish attempt,
+// confirmed not rate-related. Revisit under a scoped name.
+const RELEASE_EXCLUDED = new Set(["win32-x64"]);
+
 test("every optionalDependency has a generator target", () => {
   const { optionalDependencies, version } = require("../package.json");
   const { SUPPORTED } = require("../packaging/make-platform-package.js");
@@ -153,8 +159,10 @@ test("every optionalDependency has a generator target", () => {
       `${name} must be pinned to the main package version`
     );
   }
-  // And the reverse: nothing buildable is left unpublished.
+  // And the reverse: nothing buildable is left unpublished, aside from
+  // known, documented exclusions.
   for (const key of Object.keys(SUPPORTED)) {
+    if (RELEASE_EXCLUDED.has(key)) continue;
     assert.ok(
       names.includes(`acorn-agent-${key}`),
       `build target ${key} is missing from optionalDependencies`
